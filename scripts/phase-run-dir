@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Resolve and ensure the working-tree directory one orchestration run uses for
+# its scratch artifacts: the run ledger, per-phase decision summaries, and
+# per-phase verification evidence. Print the run directory's absolute path.
+#
+# One directory per design document
+# (.superpowers/phase-orchestrator/<doc-basename>/) so a second run against a
+# different spec in the same working tree can never read or overwrite this
+# run's ledger. A stale ledger misread as current progress makes an
+# orchestrator re-dispatch or skip whole phases — scoping removes that
+# structurally.
+#
+# The directory lives in the working tree rather than under .git/ because
+# Claude Code treats .git/ as a protected path and denies agent writes there,
+# which would block a subagent from writing its evidence file. A self-ignoring
+# .gitignore at .superpowers/phase-orchestrator/ keeps every run's scratch out
+# of `git status` and out of accidental commits, without modifying any tracked
+# file.
+#
+# Usage: phase-run-dir DESIGN_DOC
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "usage: phase-run-dir DESIGN_DOC" >&2
+  exit 2
+fi
+
+doc=$1
+
+if [ ! -f "$doc" ]; then
+  echo "no such design document: $doc" >&2
+  exit 2
+fi
+
+slug=$(basename "$doc" .md)
+if [ -z "$slug" ] || [ "$slug" = "." ] || [ "$slug" = ".." ]; then
+  echo "cannot derive a run directory name from: $doc" >&2
+  exit 2
+fi
+
+if ! root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "not inside a git repository: run this from the repository the phases will land in" >&2
+  exit 2
+fi
+
+base="$root/.superpowers/phase-orchestrator"
+dir="$base/$slug"
+mkdir -p "$dir"
+printf '*\n' > "$base/.gitignore"
+cd "$dir" && pwd
