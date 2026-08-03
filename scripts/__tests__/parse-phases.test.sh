@@ -77,4 +77,78 @@ assert_contains 'usage:' "$OUT" 'no arguments: prints usage'
 run_cmd "$PARSE" "$FIX/edge-cases.md" 1-2 extra
 assert_rc 2 'too many arguments: exits 2'
 
+# --- range selection -------------------------------------------------------
+
+# Reuses the nums() helper defined at the top of this file by Task 1.
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" 2-6
+assert_rc 0 'range 2-6: exits 0'
+assert_eq "2,3,4,5,6," "$(nums)" 'range 2-6 selects phases numbered 2..6, not the 2nd..6th'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2 to 6'
+assert_rc 0 'range "2 to 6": exits 0'
+assert_eq "2,3,4,5,6," "$(nums)" 'range "2 to 6" equals 2-6'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2,4,5'
+assert_rc 0 'comma list: exits 0'
+assert_eq "2,4,5," "$(nums)" 'comma list selects exactly those numbers'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" 3
+assert_rc 0 'single phase: exits 0'
+assert_eq "3," "$(nums)" 'single phase selects one'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" all
+assert_rc 0 'all: exits 0'
+assert_eq "0,1,2,3,4,5,6,7,8," "$(nums)" 'all selects every phase including 0'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" 0
+assert_rc 0 'phase zero: exits 0'
+assert_eq "0," "$(nums)" 'phase zero is selectable'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '5-3'
+assert_rc 2 'descending range: exits 2'
+assert_contains 'descending' "$OUT" 'descending range: message names the problem'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '6,2,4'
+assert_rc 0 'unsorted comma list: exits 0'
+assert_eq "2,4,6," "$(nums)" 'output is always ascending regardless of input order'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2,2,3'
+assert_rc 0 'repeated number: exits 0'
+assert_eq "2,3," "$(nums)" 'a repeated number yields one record'
+
+# --- ranges that must be refused -------------------------------------------
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2-99'
+assert_rc 4 'absent number: exits 4'
+assert_contains '99' "$OUT" 'absent number: message names the missing number'
+assert_contains '0 1 2 3 4 5 6 7 8' "$OUT" 'absent number: message lists available numbers'
+
+run_cmd "$PARSE" "$FIX/edge-cases.md" '4'
+assert_rc 4 'number present but not a valid phase: exits 4'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" 'two'
+assert_rc 2 'non-numeric range: exits 2'
+assert_contains 'malformed range' "$OUT" 'non-numeric range: message names the problem'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2--6'
+assert_rc 2 'double dash: exits 2'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" ''
+assert_rc 2 'empty range: exits 2'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2,'
+assert_rc 2 'trailing comma: exits 2'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '-2'
+assert_rc 2 'leading dash: exits 2'
+
+# The same defect class as the trailing comma: word splitting on IFS drops
+# leading and trailing empty fields, so these cannot be caught per-item.
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" ',2'
+assert_rc 2 'leading comma: exits 2'
+
+run_cmd "$PARSE" "$FIX/session-tracker-headings.md" '2,,3'
+assert_rc 2 'empty item between commas: exits 2'
+
 finish

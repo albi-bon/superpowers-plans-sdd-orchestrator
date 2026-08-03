@@ -108,4 +108,104 @@ if [ -z "$phases" ]; then
   exit 3
 fi
 
-printf '%s\n' "$phases"
+available=$(printf '%s\n' "$phases" | cut -f1)
+
+if [ $# -eq 1 ]; then
+  printf '%s\n' "$phases"
+  exit 0
+fi
+
+raw=$2
+
+# Normalise: lowercase, 'to' becomes '-', drop all whitespace.
+range=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+range=$(printf '%s' "$range" | sed -E 's/[[:space:]]*to[[:space:]]*/-/g')
+range=$(printf '%s' "$range" | tr -d '[:space:]')
+
+if [ -z "$range" ]; then
+  echo "malformed range: (empty). Expected e.g. 2, 2-6, '2 to 6', 2,4,5, or all" >&2
+  exit 2
+fi
+
+wanted=""
+
+if [ "$range" = "all" ]; then
+  wanted=$available
+else
+  # An empty item must be caught before splitting, not by the per-item guard
+  # below: word splitting on IFS drops leading and trailing empty fields, so
+  # '2,' splits to the single word '2' and would otherwise be accepted.
+  case "$range" in
+    ,* | *, | *,,*)
+      echo "malformed range: $raw. Expected e.g. 2, 2-6, '2 to 6', 2,4,5, or all" >&2
+      exit 2
+      ;;
+  esac
+
+  # Expand each comma-separated item into the numbers it names.
+  saved_ifs=$IFS
+  IFS=','
+  # shellcheck disable=SC2086
+  set -- $range
+  IFS=$saved_ifs
+
+  if [ $# -eq 0 ]; then
+    echo "malformed range: $raw. Expected e.g. 2, 2-6, '2 to 6', 2,4,5, or all" >&2
+    exit 2
+  fi
+
+  for item in "$@"; do
+    case "$item" in
+      *[!0-9-]* | '' | -* | *- | *-*-*)
+        echo "malformed range item: $item. Expected e.g. 2, 2-6, '2 to 6', 2,4,5, or all" >&2
+        exit 2
+        ;;
+    esac
+
+    case "$item" in
+      *-*)
+        low=${item%%-*}
+        high=${item##*-}
+        if [ -z "$low" ] || [ -z "$high" ]; then
+          echo "malformed range item: $item. Expected e.g. 2, 2-6, '2 to 6', 2,4,5, or all" >&2
+          exit 2
+        fi
+        if [ "$low" -gt "$high" ]; then
+          echo "descending range not allowed: $item. Write ${high}-${low} instead" >&2
+          exit 2
+        fi
+        n=$low
+        while [ "$n" -le "$high" ]; do
+          wanted="$wanted$n
+"
+          n=$((n + 1))
+        done
+        ;;
+      *)
+        wanted="$wanted$item
+"
+        ;;
+    esac
+  done
+fi
+
+# Deduplicate and sort ascending.
+wanted=$(printf '%s' "$wanted" | grep -v '^$' | sort -n -u)
+
+# Every requested number must exist in the document.
+missing=""
+for n in $wanted; do
+  if ! printf '%s\n' "$available" | grep -qx "$n"; then
+    missing="$missing $n"
+  fi
+done
+
+if [ -n "$missing" ]; then
+  echo "phase(s) not found in $doc:$missing" >&2
+  echo "available phase numbers: $(printf '%s' "$available" | tr '\n' ' ' | sed 's/ $//')" >&2
+  exit 4
+fi
+
+for n in $wanted; do
+  printf '%s\n' "$phases" | awk -F'\t' -v want="$n" '$1 == want { print; exit }'
+done
