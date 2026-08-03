@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Decide whether one orchestration run may start, and put the working tree on
+# the base branch it will merge into. Every check must pass or the run refuses;
+# a refusal names the failed check and the command that fixes it.
+#
+# Check order is not the design document's table order. The trunk check runs
+# before anything mutates git state — switching to main in order to then refuse
+# it is exactly the accident the check exists to prevent. The clean-tree check
+# runs before the run directory is created, so it cannot observe its own side
+# effects.
+#
+# Exit codes:
+#   0   ok
+#   2   usage error, unreadable design document, or malformed range
+#   3   the design document contains no phase headings
+#   4   a requested phase number is absent from the document
+#   10  not inside a git repository
+#   11  working tree not clean
+#   12  the base branch is main or master
+#   13  the base branch could not be resolved or created
+#   14  a phase branch exists that this run's ledger does not account for
+#
+# Permission mode is NOT checked here: it cannot be read from inside a skill
+# (the spec's D13). SKILL.md states the requirement instead.
+#
+# Usage: phase-preflight DESIGN_DOC BASE RANGE
+set -euo pipefail
+
+if [ $# -ne 3 ]; then
+  echo "usage: phase-preflight DESIGN_DOC BASE RANGE" >&2
+  exit 2
+fi
+
+doc=$1
+base=$2
+range=$3
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+if [ ! -f "$doc" ]; then
+  echo "no such design document: $doc" >&2
+  exit 2
+fi
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases will land in" >&2
+  exit 10
+fi
+
+case "$base" in
+  main | master)
+    echo "refusing to run against trunk: base is '$base'." >&2
+    echo "pass a feature branch instead, e.g. feat/<name>" >&2
+    exit 12
+    ;;
+esac
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "working tree not clean: commit or stash before starting a run (git status)" >&2
+  exit 11
+fi
+
+# Delegates the whole of the document/range contract to parse-phases and passes
+# its exit code straight through, so the two scripts can never disagree about
+# which phases a range names.
+set +e
+selected=$("$here/parse-phases" "$doc" "$range" 2>&1)
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+  printf '%s\n' "$selected" >&2
+  exit "$rc"
+fi
+
+if git show-ref --verify --quiet "refs/heads/$base"; then
+  if ! git switch "$base" >/dev/null 2>&1; then
+    echo "could not switch to base branch '$base' (git switch $base)" >&2
+    exit 13
+  fi
+else
+  trunk=""
+  for candidate in main master; do
+    if git show-ref --verify --quiet "refs/heads/$candidate"; then
+      trunk=$candidate
+      break
+    fi
+  done
+  if [ -z "$trunk" ]; then
+    echo "base branch '$base' does not exist, and neither 'main' nor 'master' exists to create it from" >&2
+    echo "create it yourself: git switch -c $base <start-point>" >&2
+    exit 13
+  fi
+  if ! git switch -c "$base" "$trunk" >/dev/null 2>&1; then
+    echo "could not create base branch '$base' off '$trunk'" >&2
+    exit 13
+  fi
+fi
+
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+docname=$(basename "$doc")
+
+# A phase branch for a requested phase is in-flight work only if this spec's
+# ledger accounts for it. Anything else has unknown provenance and is refused.
+tmpsel=$(mktemp)
+trap 'rm -f "$tmpsel"' EXIT
+printf '%s\n' "$selected" > "$tmpsel"
+
+while IFS="$(printf '\t')" read -r num _ slug; do
+  [ -n "$num" ] || continue
+  branch="phase-$num-$slug"
+  git show-ref --verify --quiet "refs/heads/$branch" || continue
+
+  if [ -f "$ledger" ] \
+    && head -n 1 "$ledger" | grep -Fq "$docname" \
+    && grep -q "^phase ${num}[^0-9]" "$ledger"; then
+    continue
+  fi
+
+  echo "branch '$branch' already exists, and this run's ledger does not account for it." >&2
+  echo "ledger: $ledger" >&2
+  echo "a leftover branch means a resume, not a fresh start: either resume the run that" >&2
+  echo "created it, or delete it (git branch -D $branch) and start again" >&2
+  exit 14
+done < "$tmpsel"
+
+numbers=$(printf '%s\n' "$selected" | cut -f1 | tr '\n' ',' | sed 's/,$//')
+echo "preflight ok: base $base, phases $numbers, run-dir $rundir"

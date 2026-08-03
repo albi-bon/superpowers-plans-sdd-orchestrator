@@ -368,6 +368,7 @@ by this table. The orchestrator does not reach into them.
   scripts/
     parse-phases        design doc → number, title, slug; validates a requested range
     phase-run-dir       resolve/create run directory, ensure it is git-ignored
+    phase-preflight     the §4.3 checks; resolves and switches to the base branch
 ```
 
 Gerund name, matching the superpowers convention (`writing-plans`, `executing-plans`,
@@ -399,6 +400,7 @@ the natural sentence rather than only on an explicit slash invocation:
 | **D11** | **Scripts are bash + `awk`, using `[[:space:]]` and never `\s`.** | BSD `awk`/`sed` on macOS do not support `\s`, and the failure is silent rather than an error. Extended 2026-08-03 while planning Phase 1, same class of bug: no bracket expressions over multibyte dashes (§4.1), no interval expressions, and no bash-4-only syntax (`${v,,}`, associative arrays) since `/bin/bash` on stock macOS is 3.2. |
 | **D12** | **All artifacts are files; dispatches carry paths; return values are capped.** | SDD's own warning: everything pasted into a dispatch or printed back stays resident for the rest of the session and is re-read every turn. The orchestrator outlives six SDD runs, so the rule binds harder here than in SDD itself. |
 | **D13** | **Permission mode is documented, not detected.** | No reliable API exists. A stated limitation beats a check that cannot work. |
+| **D14** | **Preflight is a script (`scripts/phase-preflight`), not prose in `SKILL.md`.** §4.3's checks and the base-branch resolution move into it; `SKILL.md` calls it and refuses the run on a non-zero exit. | Added 2026-08-03 while planning the build. §7 Phase 3 requires one test per §4.3 check; as prose that means invoking the whole skill six times, and the checks would be verified only by the thing they gate. As a script they are unit-tested against throwaway repositories in seconds. Does not weaken D13 — permission mode is still neither checked nor checkable. |
 
 ---
 
