@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Extract phase records from a phased design document.
+#
+# A heading qualifies when it has 2-4 leading '#', then the word Phase, then an
+# integer, then a dash separator (em dash, en dash, or hyphen), then a non-empty
+# title. Output is one tab-separated record per phase, ascending by number:
+#
+#   number<TAB>title<TAB>slug
+#
+# Portability rules this file obeys, because breaking them fails silently rather
+# than loudly (see the spec's D11):
+#   - no '\s' anywhere; BSD awk and sed do not support it
+#   - no bracket expression containing the em/en dashes; a byte-oriented awk
+#     matches their individual bytes, and '–-' can parse as a range. The three
+#     separators are matched as whole strings with index(), and the earliest
+#     position wins. index(), length() and substr() agree within any one awk,
+#     so the offset arithmetic is correct whether it counts bytes or characters.
+#   - no interval expressions like {2,4}; support is not universal
+#   - no bash-4-only syntax; /bin/bash on stock macOS is 3.2
+#
+# The number is read from the heading. It is never an ordinal index into the
+# list of phases — a document whose phases start at 0 makes the two differ, and
+# an ordinal reading silently selects the wrong work (the spec's D10).
+#
+# Usage: parse-phases DESIGN_DOC [RANGE]
+set -euo pipefail
+
+usage() {
+  echo "usage: parse-phases DESIGN_DOC [RANGE]" >&2
+}
+
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+  usage
+  exit 2
+fi
+
+doc=$1
+
+if [ ! -f "$doc" ]; then
+  echo "no such design document: $doc" >&2
+  exit 2
+fi
+
+extract() {
+  awk '
+    {
+      line = $0
+
+      # Count leading hashes without an interval expression.
+      hashes = 0
+      while (substr(line, hashes + 1, 1) == "#") hashes++
+      if (hashes < 2 || hashes > 4) next
+
+      rest = substr(line, hashes + 1)
+      sub(/^[[:space:]]+/, "", rest)
+      if (rest !~ /^Phase[[:space:]]+[0-9]/) next
+
+      sub(/^Phase[[:space:]]+/, "", rest)
+
+      num = rest
+      sub(/[^0-9].*$/, "", num)
+      if (num == "") next
+
+      after = substr(rest, length(num) + 1)
+
+      # Earliest of the three separators wins.
+      sep = 0
+      seplen = 0
+      split("— – -", dashes, " ")
+      for (i = 1; i <= 3; i++) {
+        p = index(after, dashes[i])
+        if (p > 0 && (sep == 0 || p < sep)) {
+          sep = p
+          seplen = length(dashes[i])
+        }
+      }
+      if (sep == 0) next
+
+      # Everything before the separator must be blank, or this is not a heading
+      # of the expected shape.
+      lead = substr(after, 1, sep - 1)
+      if (lead !~ /^[[:space:]]*$/) next
+
+      title = substr(after, sep + seplen)
+      sub(/^[[:space:]]+/, "", title)
+      sub(/[[:space:]]+$/, "", title)
+      if (title == "") next
+
+      # First occurrence of a number wins; a later duplicate is ignored.
+      if (num in seen) next
+      seen[num] = 1
+
+      slug = tolower(title)
+      gsub(/[^a-z0-9]+/, "-", slug)
+      sub(/^-+/, "", slug)
+      sub(/-+$/, "", slug)
+      if (slug == "") next
+
+      printf "%s\t%s\t%s\n", num, title, slug
+    }
+  ' "$1" | sort -n -k1,1
+}
+
+phases=$(extract "$doc")
+
+if [ -z "$phases" ]; then
+  echo "no phase headings found in: $doc" >&2
+  exit 3
+fi
+
+printf '%s\n' "$phases"
