@@ -406,7 +406,16 @@ the natural sentence rather than only on an explicit slash invocation:
 
 ## 7. Implementation phases
 
-Each phase is one session: its own plan, its own verification, its own commit.
+**Superseded 2026-08-03.** The project proved small enough to build in a single
+plan — `docs/superpowers/plans/2026-08-03-orchestrating-phased-specs.md` — whose
+tasks cover all three phases below. This section is kept as the record of what
+each phase was meant to deliver and how it was to be verified. The one
+verification it does not cover is §7 Phase 3's real two-phase end-to-end run:
+executing it inside the build plan would have nested this skill's own agents
+beneath the plan's, at a depth §8.1 has not verified. The first real run is that
+verification.
+
+Each phase below was to be one session: its own plan, its own verification, its own commit.
 
 ### Phase 1 — Parsing and run state
 

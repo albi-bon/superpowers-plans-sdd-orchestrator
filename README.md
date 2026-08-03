@@ -18,13 +18,16 @@ are live and the skill stays git-tracked.
 
 ## Status
 
-Being built phase by phase against `docs/superpowers/specs/2026-08-03-orchestrating-phased-specs-design.md`.
+Built in one pass against `docs/superpowers/specs/2026-08-03-orchestrating-phased-specs-design.md`.
 
-| Phase | Scope | State |
-|---|---|---|
-| 1 | `scripts/parse-phases`, `scripts/phase-run-dir`, test harness | planned |
-| 2 | Dispatch templates | not planned |
-| 3 | `SKILL.md`, the orchestration loop | not planned |
+| Piece | State |
+|---|---|
+| `scripts/parse-phases`, `scripts/phase-run-dir`, `scripts/phase-preflight` | done, unit-tested |
+| `planner-prompt.md`, `executor-prompt.md`, `verifier-prompt.md`, `repair-prompt.md` | done, structurally tested |
+| `SKILL.md` — the orchestration loop | done, structurally tested |
+
+**Not yet proven end to end.** No real multi-phase run has been executed against
+this skill; the first one is the proof. See the spec's §9 for the limits it ships with.
 
 ## Tests
 
