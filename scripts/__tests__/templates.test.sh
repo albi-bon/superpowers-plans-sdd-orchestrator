@@ -57,7 +57,7 @@ has executor-prompt.md 'PLAN_PATH' 'receives the plan path'
 has executor-prompt.md 'PHASE_BRANCH' 'receives the phase branch'
 has executor-prompt.md 'DECISIONS_PATH' 'receives the decisions file path'
 
-# The four overrides of subagent-driven-development.
+# The five overrides of subagent-driven-development.
 has executor-prompt.md 'Do NOT create or verify a worktree' 'override 1: no worktree'
 has executor-prompt.md 'superpowers:using-git-worktrees' 'override 1 names the routing it disables'
 has executor-prompt.md 'Do NOT invoke superpowers:finishing-a-development-branch' 'override 2: no branch finishing'
@@ -68,6 +68,13 @@ has executor-prompt.md 'whole-branch review after the final task' 'override 4 pl
 has executor-prompt.md 'Do not re-review after that wave' 'override 4 caps the fix wave'
 has executor-prompt.md 'breadth proportionate to the phase' 'override 4 compensates by widening the one review'
 has executor-prompt.md 'fix it before you dispatch the next task' 'override 4 keeps failing task checks blocking'
+has executor-prompt.md 'Five overrides' 'the override count is stated'
+has executor-prompt.md 'Read the ledger once' 'override 5: exactly one plan-level read'
+has executor-prompt.md 'scripts/task-brief' 'override 5: names the script it disables'
+has executor-prompt.md 'task-<N>.md' 'override 5: the task file is the brief'
+has executor-prompt.md 'task-<N>-report.md' 'override 5: reports stay in the workspace'
+has executor-prompt.md 'Produces column' 'override 5: cross-task interfaces come from the ledger'
+has executor-prompt.md 'scoped to the ledger' 'override 5: the conflict scan is scoped'
 has executor-prompt.md 'supersede' 'overrides are stated as superseding the skill'
 
 # The user directive, verbatim.

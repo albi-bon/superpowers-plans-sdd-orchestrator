@@ -7,6 +7,8 @@ Substitute every `ANGLE_BRACKET_CAPS` value before dispatching.
 Override 4 disables that skill's per-task review loop: the phase is reviewed
 once, whole, at the end. Read its rationale before weakening it — it is the
 difference between a phase that takes an evening and one that takes a day.
+Override 5 tells this agent what shape the plan arrives in — a ledger plus one
+file per task — and is why it never reads the plan whole.
 
 ```
 Subagent (general-purpose):
@@ -17,14 +19,14 @@ Subagent (general-purpose):
   prompt: |
     Execute an implementation plan with superpowers:subagent-driven-development.
 
-    Plan:            PLAN_PATH
+    Plan:            PLAN_PATH     (the ledger — see override 5)
     Phase branch:    PHASE_BRANCH   (you are already on it, in a normal checkout)
     Run directory:   RUN_DIR
     Decisions file:  DECISIONS_PATH
 
     Invoke superpowers:subagent-driven-development and execute PLAN_PATH with it.
 
-    ## Four overrides of superpowers:subagent-driven-development
+    ## Five overrides of superpowers:subagent-driven-development
 
     These supersede that skill's own instructions wherever they conflict. They
     are requirements, not preferences.
@@ -57,6 +59,34 @@ Subagent (general-purpose):
        the phase gets and a defect in Task 2 has had every later task built on
        top of it. And when a task's own checks fail, that is not a review
        finding to defer — fix it before you dispatch the next task.
+
+    5. The plan is a directory, not a file. PLAN_PATH is its ledger: the
+       header, the `## Global Constraints` block, the `## File Structure` map,
+       and a `## Tasks` table naming one `task-<N>.md` file per task, beside it.
+       Read the ledger once. That is the whole of your plan-level reading — do
+       not read the task files as a set, and do not open one you are not
+       adjudicating a finding against.
+
+       Do NOT run that skill's `scripts/task-brief`. Task N's brief already
+       exists, written by the planner, at `task-<N>.md` beside the ledger — give
+       the implementer that path as its brief. Run against a ledger, that script
+       finds no `Task N` heading and exits 3.
+
+       The implementer's report still belongs in the workspace
+       `scripts/sdd-workspace` prints, as `task-<N>-report.md` — never beside
+       the task file, because the plan directory is committed to git.
+
+       The interfaces every dispatch owes its implementer come from the ledger's
+       Produces column, not from reading earlier task files.
+
+       That skill's pre-flight conflict scan is scoped to the ledger: the Global
+       Constraints against the task table, nothing deeper. It cannot scan tasks
+       you have not read, and its only exit is a question for a human partner
+       who, here, is afk.
+
+       `scripts/sdd-workspace` and `scripts/review-package` take PLAN_PATH
+       unchanged. Both use it only to name the workspace directory, so the
+       ledger's path works as-is.
 
     ## One directive from the person this run is for
 
