@@ -41,6 +41,8 @@ done
 has 'git merge --no-ff' 'merges each phase branch with --no-ff'
 has 'ascending numeric order' 'phases run in ascending numeric order'
 has 'run.md' 'names the ledger file'
+has 'phase-<N>-<slug>/plan.md' 'the plan is a directory whose ledger is plan.md'
+has 'one file per task' 'the paths table says task files sit beside the ledger'
 has 'merged' 'the ledger records a merged state per phase'
 has 'Resume' 'documents resume'
 has 'repair attempt per phase' 'exactly one repair attempt'

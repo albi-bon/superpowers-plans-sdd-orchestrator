@@ -24,6 +24,9 @@ Subagent (general-purpose):
     1. Read the evidence file first. It names the commands that were run, their
        exit codes, and the failing output.
     2. Read the plan to understand what the phase was meant to deliver.
+       PLAN_PATH is a ledger: the header, the `## Global Constraints` block, and
+       a `## Tasks` table naming one `task-<N>.md` file per task, beside it.
+       Read the ledger, then only the task files the failure touches.
     3. Diagnose and fix the root cause. Do not paper over a failure by
        weakening, skipping, or deleting the check that caught it.
     4. Re-run the failing commands yourself and confirm each one now exits 0.

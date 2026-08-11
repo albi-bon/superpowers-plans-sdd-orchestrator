@@ -82,10 +82,16 @@ Paths to substitute into the templates:
 
 | Artifact | Path |
 |---|---|
-| Plan | `docs/superpowers/plans/<date>-<spec-slug>-phase-<N>-<slug>.md` |
+| Plan | `docs/superpowers/plans/<date>-<spec-slug>-phase-<N>-<slug>/plan.md` |
 | Executor decisions | `<run-dir>/phase-<N>-decisions.md` |
 | Verifier evidence | `<run-dir>/phase-<N>-evidence.md` |
 | Ledger | `<run-dir>/run.md` |
+
+The plan is a directory: `plan.md` is its ledger — goal, global constraints, file
+structure, and a table of tasks — with one file per task beside it, `task-1.md`,
+`task-2.md`, and so on. `planner-prompt.md` override 3 specifies it and
+`executor-prompt.md` override 5 consumes it. You hand around the `plan.md` path
+and never open any of it.
 
 Order within a phase:
 
@@ -120,11 +126,11 @@ its identity:
 # Phase run — spec: docs/superpowers/specs/…-design.md
 # base: feat/thing  requested: 2-6
 
-phase 2 (Shell & surface model): plan docs/superpowers/plans/…-phase-2-shell.md
+phase 2 (Shell & surface model): plan docs/superpowers/plans/…-phase-2-shell/plan.md
 phase 2: executed — 11 commits, review clean, 2 minor deferred, decisions phase-2-decisions.md
 phase 2: verified PASS
 phase 2: merged to base (a1b2c3d)
-phase 3 (Takeovers & interstitials): plan docs/superpowers/plans/…-phase-3-takeovers.md
+phase 3 (Takeovers & interstitials): plan docs/superpowers/plans/…-phase-3-takeovers/plan.md
 phase 3: executed — 9 commits, 1 parked
 phase 3: verified FAIL — rest-arbitration.characterization.test.ts, exit 1
 phase 3: repair round 1 — verified PASS
@@ -196,6 +202,13 @@ State these to your human partner when they matter; do not paper over them.
 4. **Nesting depth is a platform assumption, not a guarantee.** This design needs
    a subagent to spawn subagents, to depth 3. If the executor cannot dispatch its
    own implementers, halt and say so — the design does not degrade gracefully.
+5. **Nothing checks that a plan was actually split.** A planner that ignores
+   override 3 writes one `plan.md` holding every task; the executor reads it
+   whole and the run succeeds at the old cost. The saving is a convention, not a
+   mechanism. The executor's pre-flight conflict scan is scoped to the ledger for
+   the same reason it is cheap — no agent compares two task files before
+   execution starts, and the phase's single whole-branch review is the only net
+   under a plan that contradicts itself.
 
 ## Common rationalizations
 

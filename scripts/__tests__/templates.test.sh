@@ -48,6 +48,7 @@ has repair-prompt.md 'PHASE_BRANCH' 'receives the phase branch'
 has repair-prompt.md 'Do NOT switch branches' 'stays on the phase branch'
 has repair-prompt.md 'exit code' 'repairs against exit codes, not printed totals'
 has repair-prompt.md 'six lines' 'return contract is capped'
+has repair-prompt.md 'task-<N>.md' 'reads only the task files the failure touches'
 
 # --- executor-prompt.md ----------------------------------------------------
 
