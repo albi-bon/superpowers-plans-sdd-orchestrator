@@ -25,9 +25,19 @@ has planner-prompt.md 'Read the whole design document' 'planner reads the whole 
 has planner-prompt.md 'Do NOT present the execution-choice menu' 'override 1: no execution menu'
 has planner-prompt.md 'Do NOT execute the plan' 'override 2: no execution'
 has planner-prompt.md 'Global Constraints' 'copies cross-cutting constraints into the plan'
-has planner-prompt.md 'Commit the plan file' 'planner commits the plan'
+has planner-prompt.md 'Commit the whole plan directory' 'planner commits the directory'
 has planner-prompt.md 'PLAN_PATH' 'writes to the exact path it was given'
 has planner-prompt.md 'Return ONLY the plan file path' 'return contract is the path alone'
+
+# Override 3: the plan is a directory — a ledger plus one file per task.
+has planner-prompt.md 'Three overrides of superpowers:writing-plans' 'the override count is stated'
+has planner-prompt.md 'Split the plan across files' 'override 3: the plan is a directory'
+has planner-prompt.md 'task-<N>.md' 'override 3: one file per task, named by number'
+has planner-prompt.md 'Produces' 'override 3: the ledger carries the interface map'
+has planner-prompt.md 'No task steps in the ledger' 'override 3: task steps never live in the ledger'
+has planner-prompt.md 'Global constraints bind this task' 'override 3: the verbatim pointer line'
+has planner-prompt.md 'regardless of size' 'override 3: every plan splits, unconditionally'
+has planner-prompt.md 'across the whole directory' 'override 3: self-review covers every file'
 
 # --- repair-prompt.md ------------------------------------------------------
 

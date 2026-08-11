@@ -71,11 +71,12 @@ real code, no placeholders — opening with a fixed pointer line:
 ```markdown
 # Task 3: Surface attachment
 
-> Global constraints bind this task — read `../plan.md`
-> § Global Constraints before you start.
+> Global constraints bind this task — read the `plan.md` beside this file,
+> § Global Constraints, before you start.
 ```
 
-A pointer, not a copy. The ledger is deliberately thin, so the extra read is
+A pointer, not a copy — and a cwd-independent one, since task files sit beside
+the ledger, not below it. The ledger is deliberately thin, so the extra read is
 cheap, there is one source of truth for the constraints, and the implementer
 picks up goal and architecture in the same call. Duplicating the block into every
 task file would put the most repair-edited section of a plan in N places.
