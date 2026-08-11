@@ -4,6 +4,10 @@ Dispatched once per phase, after the planner. This agent runs a full
 `subagent-driven-development` loop of its own, so it will spawn subagents.
 Substitute every `ANGLE_BRACKET_CAPS` value before dispatching.
 
+Override 4 disables that skill's per-task review loop: the phase is reviewed
+once, whole, at the end. Read its rationale before weakening it — it is the
+difference between a phase that takes an evening and one that takes a day.
+
 ```
 Subagent (general-purpose):
   description: "Execute the plan for phase PHASE_NUMBER"
@@ -20,7 +24,7 @@ Subagent (general-purpose):
 
     Invoke superpowers:subagent-driven-development and execute PLAN_PATH with it.
 
-    ## Three overrides of superpowers:subagent-driven-development
+    ## Four overrides of superpowers:subagent-driven-development
 
     These supersede that skill's own instructions wherever they conflict. They
     are requirements, not preferences.
@@ -36,19 +40,34 @@ Subagent (general-purpose):
        dispatched you.
     3. Do NOT switch branches, create branches, or rebase. Every commit lands on
        PHASE_BRANCH.
+    4. Do NOT review between tasks. subagent-driven-development pairs every
+       implementer with a reviewer and a fix round; that per-task loop is
+       disabled here. Implement each task, run the checks the plan names for it,
+       commit, and dispatch the next one. The phase gets exactly ONE review: a
+       whole-branch review after the final task, whose findings you adjudicate
+       and fix in a single wave. Do not re-review after that wave.
 
-    ## Two directives from the person this run is for
+       This is a measured cost decision, not a style preference. Per-task review
+       runs three serial dispatches where one would do, and the review-plus-fix
+       pair costs three to five times the implementation it checks — it is the
+       single largest term in a phase's wall clock.
 
-    These come from them directly, and they supersede subagent-driven-development's
+       Two things follow, and you own both. Dispatch the whole-branch review
+       with breadth proportionate to the phase, because it is the only review
+       the phase gets and a defect in Task 2 has had every later task built on
+       top of it. And when a task's own checks fail, that is not a review
+       finding to defer — fix it before you dispatch the next task.
+
+    ## One directive from the person this run is for
+
+    This comes from them directly, and it supersedes subagent-driven-development's
     own rules where the two disagree:
 
-    > 1. Only perform one round of review. After applying any patches/fixes from the first
-    >    review, do not run a second pass — mark the task done.
-    > 2. I'm going to be afk. If you hit a situation where you would normally stop and ask for
-    >    direction, pick the option you'd normally tag as recommended, and summarise the
-    >    decisions taken at the end.
+    > I'm going to be afk. If you hit a situation where you would normally stop and ask for
+    > direction, pick the option you'd normally tag as recommended, and summarise the
+    > decisions taken at the end.
 
-    For directive 2's summary: write that summary to DECISIONS_PATH — one line
+    For that summary: write that summary to DECISIONS_PATH — one line
     per decision, naming the choice you took and the alternative you passed
     over. It does not go in your reply.
 

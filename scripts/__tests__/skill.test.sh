@@ -56,7 +56,8 @@ has 'mid-tier' 'the verifier takes a mid-tier model'
 
 has 'Known limits' 'has a known-limits section'
 has 'parks on a prompt' 'limit 1: wrong permission mode stalls rather than fails'
-has 'compounds across phases' 'limit 2: capped review compounds'
+has 'compounds across phases' 'limit 2: one review per phase, and it compounds'
+has 'nothing between tasks' 'limit 2 states there is no per-task review'
 has 'working tree is busy' 'limit 3: the working tree is busy for the whole run'
 has 'depth' 'limit 4: nesting depth is a platform assumption'
 

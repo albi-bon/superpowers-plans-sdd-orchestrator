@@ -71,7 +71,7 @@ omitted model inherits this session's, which is the most expensive one.
 | # | Dispatch | Template | Model | Why |
 |---|---|---|---|---|
 | ① | planner | `planner-prompt.md` | most capable | Writing a plan from a spec is design judgment, and every downstream cost compounds from its quality |
-| ② | executor | `executor-prompt.md` | most capable | It is itself a controller, running a review loop and adjudicating findings unattended |
+| ② | executor | `executor-prompt.md` | most capable | It is itself a controller, running the phase's single whole-branch review and adjudicating its findings unattended |
 | ③ | verifier | `verifier-prompt.md` | mid-tier | Runs commands and reads exit codes — mechanical, but it must still reason about which gates a repository has |
 | — | repair | `repair-prompt.md` | most capable | Fresh eyes on something a full execution run did not get right |
 
@@ -182,9 +182,15 @@ State these to your human partner when they matter; do not paper over them.
 
 1. **The wrong permission mode stalls rather than fails.** The run parks on a prompt
    mid-phase and looks like a slow phase until inspected.
-2. **Capped review compounds across phases.** The executor runs one review round
-   per task, so phase N+1 builds on phase N's residual findings. The ledger and
-   the report surface them; nothing prevents them.
+2. **Review is once per phase, at the end, and it compounds across phases.** The
+   executor reviews the whole branch after the last task — nothing between tasks.
+   Two consequences. Within a phase, a defect in an early task has every later
+   task built on top of it before anything looks; the fix wave that follows is
+   correspondingly larger and lands late. Across phases, phase N+1 builds on
+   phase N's residual findings. The ledger and the report surface them; nothing
+   prevents them. This buys back the largest term in a phase's wall clock — the
+   review-plus-fix pair costs three to five times the implementation it checks —
+   and the price is paid in exactly this coin.
 3. **The working tree is busy for the whole run.** No worktrees, so the
    repository cannot be used for anything else while phases execute.
 4. **Nesting depth is a platform assumption, not a guarantee.** This design needs
@@ -195,7 +201,8 @@ State these to your human partner when they matter; do not paper over them.
 
 | Excuse | Reality |
 |--------|---------|
-| "I'll read the plan to check the planner did it right" | That is what the verifier and the executor's own review are for. A plan in your context is there for every remaining phase. |
+| "I'll read the plan to check the planner did it right" | That is what the verifier and the executor's whole-branch review are for. A plan in your context is there for every remaining phase. |
+| "This phase is delicate — I'll ask the executor to review each task after all" | The one-review-per-phase rule is a measured decision, not a default. Per-task review triples the dispatch count and is the largest term in a phase's wall clock. If a phase truly needs more scrutiny, buy it in the whole-branch review's breadth, not in a loop. |
 | "The verifier's FAIL looks like a flake, I'll just merge" | The verifier reads exit codes; you did not run the command. One repair attempt, then halt. |
 | "Repair almost worked, one more round" | Exactly one. Past it, the failure is structural and another round burns the afternoon. |
 | "I'll fix this small thing myself" | Controller fixes skip verification and pollute your context. Dispatch it. |

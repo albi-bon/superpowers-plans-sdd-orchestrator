@@ -47,32 +47,32 @@ has executor-prompt.md 'PLAN_PATH' 'receives the plan path'
 has executor-prompt.md 'PHASE_BRANCH' 'receives the phase branch'
 has executor-prompt.md 'DECISIONS_PATH' 'receives the decisions file path'
 
-# The three overrides of subagent-driven-development.
+# The four overrides of subagent-driven-development.
 has executor-prompt.md 'Do NOT create or verify a worktree' 'override 1: no worktree'
 has executor-prompt.md 'superpowers:using-git-worktrees' 'override 1 names the routing it disables'
 has executor-prompt.md 'Do NOT invoke superpowers:finishing-a-development-branch' 'override 2: no branch finishing'
 has executor-prompt.md 'Do NOT switch branches' 'override 3: no branch switching'
+has executor-prompt.md 'Do NOT review between tasks' 'override 4: no per-task review'
+has executor-prompt.md 'exactly ONE review' 'override 4 names what replaces the per-task loop'
+has executor-prompt.md 'whole-branch review after the final task' 'override 4 places the single review at the end'
+has executor-prompt.md 'Do not re-review after that wave' 'override 4 caps the fix wave'
+has executor-prompt.md 'breadth proportionate to the phase' 'override 4 compensates by widening the one review'
+has executor-prompt.md 'fix it before you dispatch the next task' 'override 4 keeps failing task checks blocking'
 has executor-prompt.md 'supersede' 'overrides are stated as superseding the skill'
 
-# The two user directives, verbatim.
-has executor-prompt.md \
-  'Only perform one round of review. After applying any patches/fixes from the first' \
-  'directive 1 present verbatim, line 1'
-has executor-prompt.md \
-  'review, do not run a second pass — mark the task done.' \
-  'directive 1 present verbatim, line 2'
+# The user directive, verbatim.
 has executor-prompt.md \
   "I'm going to be afk. If you hit a situation where you would normally stop and ask for" \
-  'directive 2 present verbatim, line 1'
+  'directive present verbatim, line 1'
 has executor-prompt.md \
   'direction, pick the option you' \
-  'directive 2 present verbatim, line 2'
-# Directive 2's closing sentence wraps across two lines in the design document,
+  'directive present verbatim, line 2'
+# The directive's closing sentence wraps across two lines in the design document,
 # and the template copies it byte for byte, so no single contiguous substring
 # spans the wrap. Assert the two fragments the wrap actually produces; Task 6
 # Step 6's diff against the spec is what guarantees the whole block.
-has executor-prompt.md 'and summarise the' 'directive 2 present verbatim, line 3a'
-has executor-prompt.md 'decisions taken at the end.' 'directive 2 present verbatim, line 3b'
+has executor-prompt.md 'and summarise the' 'directive present verbatim, line 3a'
+has executor-prompt.md 'decisions taken at the end.' 'directive present verbatim, line 3b'
 has executor-prompt.md 'write that summary to DECISIONS_PATH' 'the decisions summary goes to a file, not the reply'
 
 has executor-prompt.md 'ten lines' 'return contract is capped'
