@@ -51,4 +51,38 @@ assert_rc 1 'real directory in the way: exits 1'
 assert_contains 'not a symlink' "$OUT" 'real directory: message names the problem'
 assert_eq 'yes' "$([ -f "$dest/keep.txt" ] && echo yes || echo no)" 'real directory: contents untouched'
 
+# Host selection is independent; no installation touches real user directories.
+run_target() {
+  set +e
+  OUT=$(CLAUDE_SKILLS_DIR="$tmp/claude skills" CODEX_SKILLS_DIR="$tmp/codex skills" "$INSTALL" "$@" 2>&1)
+  RC=$?
+  set -e
+}
+run_target codex
+assert_rc 0 'Codex install: succeeds'
+assert_eq "$ROOT" "$(cd "$tmp/codex skills/orchestrating-phased-specs" && pwd -P)" 'Codex link resolves to checkout'
+assert_eq 'no' "$([ -e "$tmp/claude skills" ] && echo yes || echo no)" 'Codex install does not install Claude'
+run_target all
+assert_rc 0 'both hosts: succeeds'
+assert_eq "$ROOT" "$(cd "$tmp/claude skills/orchestrating-phased-specs" && pwd -P)" 'combined install creates Claude link'
+run_target all
+assert_rc 0 'both hosts: idempotent'
+
+# Broken links should be replaceable too (cd into one fails).
+rm "$tmp/codex skills/orchestrating-phased-specs"
+ln -s "$tmp/does-not-exist" "$tmp/codex skills/orchestrating-phased-specs"
+run_target codex
+assert_rc 0 'dangling link: repaired'
+assert_eq "$ROOT" "$(cd "$tmp/codex skills/orchestrating-phased-specs" && pwd -P)" 'dangling link now reaches checkout'
+rm "$tmp/codex skills/orchestrating-phased-specs"
+mkdir "$tmp/codex skills/orchestrating-phased-specs"
+printf 'keep\n' > "$tmp/codex skills/orchestrating-phased-specs/keep.txt"
+run_target codex
+assert_rc 1 'Codex real directory: refused'
+assert_eq 'keep' "$(cat "$tmp/codex skills/orchestrating-phased-specs/keep.txt")" 'Codex directory preserved'
+run_target unknown
+assert_rc 2 'unknown target: usage error'
+run_target codex extra
+assert_rc 2 'extra argument: usage error'
+
 finish

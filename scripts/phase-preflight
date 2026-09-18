@@ -3,6 +3,7 @@
 # the base branch it will merge into. Every check must pass or the run refuses;
 # a refusal names the failed check and the command that fixes it.
 #
+# All identity and collision checks run before branch switching.
 # Check order is not the design document's table order. The trunk check runs
 # before anything mutates git state — switching to main in order to then refuse
 # it is exactly the accident the check exists to prevent. The clean-tree check
@@ -19,9 +20,10 @@
 #   12  the base branch is main or master
 #   13  the base branch could not be resolved or created
 #   14  a phase branch exists that this run's ledger does not account for
+#   15  the run ledger belongs to another spec or base
 #
-# Permission mode is NOT checked here: it cannot be read from inside a skill
-# (the spec's D13). SKILL.md states the requirement instead.
+# Runtime capabilities and permissions are checked by the controller; this
+# script only checks repository state. See platform-guide.md.
 #
 # Usage: phase-preflight DESIGN_DOC BASE RANGE
 set -euo pipefail
@@ -72,6 +74,53 @@ if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi
 
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+# Preserve existing run directories, but never reuse a basename collision or
+# a run on a different base. Resolve relative ledger paths from the repo root.
+root=$(git rev-parse --show-toplevel)
+docpath=$(cd "$(dirname "$doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$doc")")
+if [ -f "$ledger" ]; then
+  saved_doc=$(sed -n '1s/^# Phase run — spec: //p' "$ledger")
+  saved_base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$ledger")
+  case "$saved_doc" in
+    /*) ;;
+    *) saved_doc="$root/$saved_doc" ;;
+  esac
+  saved_path=""
+  if [ -f "$saved_doc" ]; then
+    saved_path=$(cd "$(dirname "$saved_doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$saved_doc")")
+  fi
+  if [ "$saved_path" != "$docpath" ] || [ "$saved_base" != "$base" ]; then
+    echo "run ledger belongs to a different spec or base: $ledger" >&2
+    echo "resume with its original spec and base, or move the run directory aside before starting a separate run" >&2
+    exit 15
+  fi
+fi
+
+# A phase branch for a requested phase is in-flight work only if this spec's
+# ledger accounts for it. Anything else has unknown provenance and is refused.
+tmpsel=$(mktemp)
+trap 'rm -f "$tmpsel"' EXIT
+printf '%s\n' "$selected" > "$tmpsel"
+
+while IFS="$(printf '\t')" read -r num _ slug; do
+  [ -n "$num" ] || continue
+  branch="phase-$num-$slug"
+  git show-ref --verify --quiet "refs/heads/$branch" || continue
+
+  if [ -f "$ledger" ] \
+    && grep -q "^phase ${num}[^0-9]" "$ledger"; then
+    continue
+  fi
+
+  echo "branch '$branch' already exists, and this run's ledger does not account for it." >&2
+  echo "ledger: $ledger" >&2
+  echo "a leftover branch means a resume, not a fresh start: either resume the run that" >&2
+  echo "created it, or delete it (git branch -D $branch) and start again" >&2
+  exit 14
+done < "$tmpsel"
+
 if git show-ref --verify --quiet "refs/heads/$base"; then
   if ! git switch "$base" >/dev/null 2>&1; then
     echo "could not switch to base branch '$base' (git switch $base)" >&2
@@ -96,33 +145,11 @@ else
   fi
 fi
 
-rundir=$("$here/phase-run-dir" "$doc")
-ledger="$rundir/run.md"
-docname=$(basename "$doc")
-
-# A phase branch for a requested phase is in-flight work only if this spec's
-# ledger accounts for it. Anything else has unknown provenance and is refused.
-tmpsel=$(mktemp)
-trap 'rm -f "$tmpsel"' EXIT
-printf '%s\n' "$selected" > "$tmpsel"
-
-while IFS="$(printf '\t')" read -r num _ slug; do
-  [ -n "$num" ] || continue
-  branch="phase-$num-$slug"
-  git show-ref --verify --quiet "refs/heads/$branch" || continue
-
-  if [ -f "$ledger" ] \
-    && head -n 1 "$ledger" | grep -Fq "$docname" \
-    && grep -q "^phase ${num}[^0-9]" "$ledger"; then
-    continue
-  fi
-
-  echo "branch '$branch' already exists, and this run's ledger does not account for it." >&2
-  echo "ledger: $ledger" >&2
-  echo "a leftover branch means a resume, not a fresh start: either resume the run that" >&2
-  echo "created it, or delete it (git branch -D $branch) and start again" >&2
-  exit 14
-done < "$tmpsel"
+# Initialize once, after every refusal check, without overwriting resume state.
+if [ ! -f "$ledger" ]; then
+  printf '# Phase run — spec: %s\n# base: %s  requested: %s\n\n' \
+    "$docpath" "$base" "$range" > "$ledger"
+fi
 
 numbers=$(printf '%s\n' "$selected" | cut -f1 | tr '\n' ',' | sed 's/,$//')
 echo "preflight ok: base $base, phases $numbers, run-dir $rundir"

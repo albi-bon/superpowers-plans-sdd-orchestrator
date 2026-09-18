@@ -21,11 +21,10 @@ has 'name: orchestrating-phased-specs' 'frontmatter names the skill'
 has 'description: Use when' 'description states triggering conditions'
 has 'phases 2 to 6' 'description carries the natural trigger phrasing'
 
-# --- the permission-mode requirement, stated where it cannot be missed -----
+# --- runtime setup ---------------------------------------------------------
 
-assert_contains 'bypass-permissions' "$(sed -n '1,25p' "$SKILL")" \
-  'SKILL.md: permission-mode requirement appears in the opening lines'
-has 'cannot be read from inside a skill' 'says why permission mode is not checked'
+has 'platform-guide.md' 'links the host-specific setup guide'
+has 'A skill cannot grant permissions' 'respects host permissions'
 
 # --- every script and template it depends on -------------------------------
 
@@ -51,7 +50,7 @@ has 'nothing pushed, no PR opened' 'the run ends at a report'
 
 # --- the model table -------------------------------------------------------
 
-has 'name a model explicitly' 'requires an explicit model on every dispatch'
+has 'Name a model explicitly' 'requires an explicit model on every dispatch'
 has 'mid-tier' 'the verifier takes a mid-tier model'
 
 # --- the four known limits -------------------------------------------------

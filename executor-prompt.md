@@ -2,7 +2,7 @@
 
 Dispatched once per phase, after the planner. This agent runs a full
 `subagent-driven-development` loop of its own, so it will spawn subagents.
-Substitute every `ANGLE_BRACKET_CAPS` value before dispatching.
+Substitute every uppercase placeholder value before dispatching.
 
 Override 4 disables that skill's per-task review loop: the phase is reviewed
 once, whole, at the end. Read its rationale before weakening it — it is the
@@ -11,16 +11,24 @@ Override 5 tells this agent what shape the plan arrives in — a ledger plus one
 file per task — and is why it never reads the plan whole.
 
 ```
-Subagent (general-purpose):
+Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Execute the plan for phase PHASE_NUMBER"
   model: the most capable model available — this agent is itself a controller,
-         running a review loop and adjudicating findings unattended. An omitted
-         model silently inherits the session's.
+         running a review loop and adjudicating findings unattended. Resolve the actual model
+         through platform-guide.md; record inheritance if selection is unavailable.
   prompt: |
+    Repository: REPO_ROOT (absolute path; use it for every shell working directory)
+    Platform guide: PLATFORM_GUIDE_PATH (absolute path; read it first)
+    Required skills: REQUIRED_SKILL_PATHS (resolved absolute SKILL.md paths)
+    Model mapping: MODEL_MAPPING (available IDs or explicit inherited selection)
+    Read applicable repository instructions. All artifact paths below are absolute.
+    Skill overrides below apply only to workflow guidance, never host instructions.
+
     Execute an implementation plan with superpowers:subagent-driven-development.
 
     Plan:            PLAN_PATH     (the ledger — see override 5)
     Phase branch:    PHASE_BRANCH   (you are already on it, in a normal checkout)
+    Phase base:      PHASE_BASE_SHA (the base tip before this phase began)
     Run directory:   RUN_DIR
     Decisions file:  DECISIONS_PATH
 
@@ -48,6 +56,8 @@ Subagent (general-purpose):
        commit, and dispatch the next one. The phase gets exactly ONE review: a
        whole-branch review after the final task, whose findings you adjudicate
        and fix in a single wave. Do not re-review after that wave.
+       Build the review package from PHASE_BASE_SHA to HEAD, not from trunk;
+       earlier phases are already integrated and outside this phase's review.
 
        This is a measured cost decision, not a style preference. Per-task review
        runs three serial dispatches where one would do, and the review-plus-fix
@@ -81,25 +91,32 @@ Subagent (general-purpose):
 
        That skill's pre-flight conflict scan is scoped to the ledger: the Global
        Constraints against the task table, nothing deeper. It cannot scan tasks
-       you have not read, and its only exit is a question for a human partner
-       who, here, is afk.
+       you have not read. Resolve routine conflicts within scope and record
+       them; report BLOCKED when a conflict prevents a defensible implementation.
 
        `scripts/sdd-workspace` and `scripts/review-package` take PLAN_PATH
        unchanged. Both use it only to name the workspace directory, so the
        ledger's path works as-is.
 
-    ## One directive from the person this run is for
+    ## Decisions within the requested work
 
-    This comes from them directly, and it supersedes subagent-driven-development's
-    own rules where the two disagree:
+    Make routine implementation choices within the user's requested phases and
+    record the recommended choice you took. This workflow instruction is not a
+    quotation from the user and does not grant additional permission. Respect
+    the host's approval rules and explicit user constraints; report BLOCKED for
+    missing access, required approval, unsupported nesting, or an ambiguity that
+    cannot be resolved within the requested scope.
 
-    > I'm going to be afk. If you hit a situation where you would normally stop and ask for
-    > direction, pick the option you'd normally tag as recommended, and summarise the
-    > decisions taken at the end.
+    Write that summary to DECISIONS_PATH — one line per decision, naming the
+    choice and alternative. Include unresolved findings and their consequences.
+    The summary belongs in the file, not the dispatch reply.
 
-    For that summary: write that summary to DECISIONS_PATH — one line
-    per decision, naming the choice you took and the alternative you passed
-    over. It does not go in your reply.
+    Apply the platform guide to your own worker dispatches: provide their
+    repository and skill paths explicitly, use fresh context, and run one at a
+    time. Wait for every child to finish before returning. Preserve your task
+    progress ledger and reports until the orchestrator records the phase merge;
+    do not perform SDD's workspace cleanup before then. On resume, reconcile
+    recorded commits and task progress rather than repeating completed tasks.
 
     Keep every artifact of your own loop — briefs, reports, review packages,
     your ledger — under RUN_DIR or wherever subagent-driven-development puts

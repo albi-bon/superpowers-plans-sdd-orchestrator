@@ -78,20 +78,9 @@ has executor-prompt.md 'Produces column' 'override 5: cross-task interfaces come
 has executor-prompt.md 'scoped to the ledger' 'override 5: the conflict scan is scoped'
 has executor-prompt.md 'supersede' 'overrides are stated as superseding the skill'
 
-# The user directive, verbatim.
-has executor-prompt.md \
-  "I'm going to be afk. If you hit a situation where you would normally stop and ask for" \
-  'directive present verbatim, line 1'
-has executor-prompt.md \
-  'direction, pick the option you' \
-  'directive present verbatim, line 2'
-# The directive's closing sentence wraps across two lines in the design document,
-# and the template copies it byte for byte, so no single contiguous substring
-# spans the wrap. Assert the two fragments the wrap actually produces; Task 6
-# Step 6's diff against the spec is what guarantees the whole block.
-has executor-prompt.md 'and summarise the' 'directive present verbatim, line 3a'
-has executor-prompt.md 'decisions taken at the end.' 'directive present verbatim, line 3b'
-has executor-prompt.md 'write that summary to DECISIONS_PATH' 'the decisions summary goes to a file, not the reply'
+# Decisions remain within the actual request; no fabricated user quotation.
+has executor-prompt.md 'does not grant additional permission' 'decisions do not expand authorization'
+has executor-prompt.md 'Write that summary to DECISIONS_PATH' 'decisions persist in the report file'
 
 has executor-prompt.md 'ten lines' 'return contract is capped'
 has executor-prompt.md 'BLOCKED' 'return contract carries a status'

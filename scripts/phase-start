@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Start or resume one phase after checking the run identity and repository.
+# Usage: phase-start DESIGN_DOC BASE PHASE_NUMBER
+# Exit 16: existing phase branch no longer contains the current base.
+# Exit 17: the ledger already records this phase as merged.
+# Exit 18: an unfinished phase recorded in the ledger has lost its branch.
+set -euo pipefail
+if [ "$#" -ne 3 ]; then
+  echo "usage: phase-start DESIGN_DOC BASE PHASE_NUMBER" >&2
+  exit 2
+fi
+here=$(cd "$(dirname "$0")" && pwd)
+doc=$1
+base=$2
+num=$3
+case "$num" in
+  '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;;
+esac
+"$here/phase-preflight" "$doc" "$base" "$num" >/dev/null
+record=$("$here/parse-phases" "$doc" "$num")
+slug=$(printf '%s\n' "$record" | cut -f3)
+branch="phase-$num-$slug"
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+if grep -q "^phase $num: merged to base (" "$ledger"; then
+  echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
+  exit 17
+fi
+if git show-ref --verify --quiet "refs/heads/$branch"; then
+  if ! git merge-base --is-ancestor "$base" "$branch"; then
+    echo "phase branch '$branch' does not contain current base '$base'; inspect before resuming" >&2
+    exit 16
+  fi
+  git switch "$branch" >&2
+else
+  if grep -q "^phase ${num}[^0-9]" "$ledger"; then
+    echo "ledger records phase $num but branch '$branch' is missing; inspect before resuming" >&2
+    exit 18
+  fi
+  git switch -c "$branch" "$base" >&2
+  printf 'phase %s: started — branch %s\n' "$num" "$branch" >> "$ledger"
+fi
+printf '%s\n' "$branch"

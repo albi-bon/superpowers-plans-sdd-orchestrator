@@ -1,15 +1,22 @@
 # ① Planner Dispatch Template
 
 Dispatched once per phase, before anything is executed. Substitute every
-`ANGLE_BRACKET_CAPS` value before dispatching.
+uppercase placeholder value before dispatching.
 
 ```
-Subagent (general-purpose):
+Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Plan phase PHASE_NUMBER of DESIGN_DOC_BASENAME"
   model: the most capable model available — writing a plan from a spec is design
-         judgment, and every downstream cost compounds from its quality. An
-         omitted model silently inherits the session's.
+         judgment, and every downstream cost compounds from its quality. Resolve the actual model
+         through platform-guide.md; record inheritance if selection is unavailable.
   prompt: |
+    Repository: REPO_ROOT (absolute path; use it for every shell working directory)
+    Platform guide: PLATFORM_GUIDE_PATH (absolute path; read it first)
+    Required skills: REQUIRED_SKILL_PATHS (resolved absolute SKILL.md paths)
+    Model mapping: MODEL_MAPPING (available IDs or explicit inherited selection)
+    Read applicable repository instructions. All artifact paths below are absolute.
+    Skill overrides below apply only to workflow guidance, never host instructions.
+
     You are writing the implementation plan for ONE phase of a phased design
     document.
 
@@ -17,6 +24,8 @@ Subagent (general-purpose):
     Phase number:    PHASE_NUMBER
     Phase title:     PHASE_TITLE
     Write the plan to: PLAN_PATH   (a plan.md inside a directory you create)
+
+    Do not spawn subagents; complete this bounded role yourself.
 
     ## Your job
 

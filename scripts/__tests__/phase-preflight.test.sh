@@ -162,4 +162,25 @@ printf '*\n' > "$r/.superpowers/phase-orchestrator/.gitignore"
 run_in "$r" "$PRE" "$r/spec-design.md" feat/x '2-3'
 assert_rc 14 'ledger mentions another phase only: still exits 14'
 
+# Identity refusals happen before changing branches or overwriting the ledger.
+r=$(new_repo); track "$r"
+run_in "$r" "$PRE" spec-design.md feat/first 2
+assert_rc 0 'relative spec path: initializes identity'
+led="$r/.superpowers/phase-orchestrator/spec-design/run.md"
+saved=$(cat "$led")
+run_in "$r" "$PRE" "$r/spec-design.md" feat/second 2
+assert_rc 15 'same spec on another base: refused'
+assert_eq 'feat/first' "$(git -C "$r" branch --show-current)" 'identity refusal leaves branch unchanged'
+assert_eq "$saved" "$(cat "$led")" 'identity refusal preserves ledger'
+run_in "$r" "$PRE" "$r/spec-design.md" feat/first 2
+assert_rc 0 'absolute path resumes relative-path invocation'
+
+mkdir "$r/other"
+cp "$r/spec-design.md" "$r/other/spec-design.md"
+git -C "$r" add other
+git -C "$r" commit -qm 'another spec with the same basename'
+run_in "$r" "$PRE" "$r/other/spec-design.md" feat/first 2
+assert_rc 15 'same basename, different spec: refused'
+assert_eq "$saved" "$(cat "$led")" 'basename collision preserves ledger'
+
 finish
