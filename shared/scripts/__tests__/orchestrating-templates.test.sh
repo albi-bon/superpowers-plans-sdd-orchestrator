@@ -6,7 +6,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=assert.sh
 . "$here/assert.sh"
 
-ROOT=$(cd "$here/../.." && pwd)
+ROOT=$(cd "$here/../../../skills/orchestrating-phased-specs" && pwd)
 
 # has FILE NEEDLE MESSAGE — the template file must contain NEEDLE verbatim.
 # NEEDLE must be free of '*', '?' and '[' — assert_contains globs.

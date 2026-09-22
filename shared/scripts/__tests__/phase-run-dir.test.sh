@@ -58,6 +58,23 @@ assert_rc 0 'second spec: exits 0'
 assert_eq "$tmp/.superpowers/phase-orchestrator/other-design" "$OUT" \
   'a different spec gets its own directory'
 
+# Namespaces: each skill keeps its runs apart; the default is unchanged.
+run_in "$tmp" env PHASE_RUN_NAMESPACE=phase-builder "$RUNDIR" "$tmp/my-feature-design.md"
+assert_rc 0 'namespaced call: exits 0'
+assert_eq "$tmp/.superpowers/phase-builder/my-feature-design" "$OUT" \
+  'the namespace selects a separate run directory for the same spec'
+assert_eq '*' "$(cat "$tmp/.superpowers/phase-builder/.gitignore")" \
+  'the namespaced parent is self-ignoring too'
+for bad in '' '.hidden' 'a/b' '..'; do
+  run_in "$tmp" env PHASE_RUN_NAMESPACE="$bad" "$RUNDIR" "$tmp/my-feature-design.md"
+  if [ -z "$bad" ]; then
+    # An empty value falls back to the default, like an unset one.
+    assert_rc 0 'empty namespace: falls back to the default'
+  else
+    assert_rc 2 "namespace '$bad': refused"
+  fi
+done
+
 # Refusals.
 run_in "$tmp" "$RUNDIR" "$tmp/nope.md"
 assert_rc 2 'missing design document: exits 2'

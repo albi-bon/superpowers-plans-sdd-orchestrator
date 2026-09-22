@@ -4,7 +4,7 @@
 # per-phase verification evidence. Print the run directory's absolute path.
 #
 # One directory per design document
-# (.superpowers/phase-orchestrator/<doc-basename>/) so a second run against a
+# (.superpowers/<namespace>/<doc-basename>/) so a second run against a
 # different spec in the same working tree can never read or overwrite this
 # run's ledger. A stale ledger misread as current progress makes an
 # orchestrator re-dispatch or skip whole phases — scoping removes that
@@ -13,9 +13,14 @@
 # The directory lives in the working tree rather than under .git/ because
 # Claude Code treats .git/ as a protected path and denies agent writes there,
 # which would block a subagent from writing its evidence file. A self-ignoring
-# .gitignore at .superpowers/phase-orchestrator/ keeps every run's scratch out
-# of `git status` and out of accidental commits, without modifying any tracked
+# .gitignore at .superpowers/<namespace>/ keeps every run's scratch out of
+# `git status` and out of accidental commits, without modifying any tracked
 # file.
+#
+# The namespace comes from PHASE_RUN_NAMESPACE and defaults to
+# phase-orchestrator, where orchestrating-phased-specs has always kept its
+# runs. Each skill's wrapper scripts set it, so two skills run against the same
+# spec keep separate ledgers. It must be a single plain directory name.
 #
 # Usage: phase-run-dir DESIGN_DOC
 set -euo pipefail
@@ -43,7 +48,15 @@ if ! root=$(git rev-parse --show-toplevel 2>/dev/null); then
   exit 2
 fi
 
-base="$root/.superpowers/phase-orchestrator"
+namespace=${PHASE_RUN_NAMESPACE:-phase-orchestrator}
+case "$namespace" in
+  '' | .* | */*)
+    echo "invalid PHASE_RUN_NAMESPACE: '$namespace' (a plain directory name, not starting with '.')" >&2
+    exit 2
+    ;;
+esac
+
+base="$root/.superpowers/$namespace"
 dir="$base/$slug"
 mkdir -p "$dir"
 printf '*\n' > "$base/.gitignore"

@@ -6,7 +6,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=assert.sh
 . "$here/assert.sh"
 
-ROOT=$(cd "$here/../.." && pwd)
+ROOT=$(cd "$here/../../../skills/orchestrating-phased-specs" && pwd)
 SKILL="$ROOT/SKILL.md"
 BODY=$(cat "$SKILL" 2>/dev/null || true)
 

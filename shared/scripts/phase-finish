@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Merge one verified phase into the base branch and record it in the ledger.
+#
+# This is the controller's whole merge step in one call, so the controller runs
+# a single command and reads a single line instead of driving git by hand every
+# phase. Checks run before anything moves: a dirty tree or a phase branch whose
+# HEAD is not the commit the verifier passed means the merge would carry work
+# nobody verified.
+#
+# Conflicts cannot arise structurally — each phase branch forks from the
+# current base tip and base advances only through these merges — but the merge
+# exit code is still checked. On failure the merge is aborted and the working
+# tree is put back on the phase branch, so base is left exactly as it was.
+#
+# Exit codes:
+#   0   merged and recorded
+#   2   usage error
+#   11  working tree not clean (from preflight, or checked here)
+#   17  the ledger already records this phase as merged
+#   18  the phase branch does not exist
+#   19  the phase branch HEAD is not VERIFIED_SHA
+#   20  the merge failed; it was aborted and base is unchanged
+#   other non-zero codes pass through from phase-preflight
+#
+# Usage: phase-finish DESIGN_DOC BASE PHASE_NUMBER VERIFIED_SHA
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+  echo "usage: phase-finish DESIGN_DOC BASE PHASE_NUMBER VERIFIED_SHA" >&2
+  exit 2
+fi
+
+here=$(cd "$(dirname "$0")" && pwd)
+doc=$1
+base=$2
+num=$3
+verified=$4
+
+case "$num" in
+  '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;;
+esac
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "working tree not clean: the merge would carry unverified changes (git status)" >&2
+  exit 11
+fi
+
+record=$("$here/parse-phases" "$doc" "$num")
+title=$(printf '%s\n' "$record" | cut -f2)
+slug=$(printf '%s\n' "$record" | cut -f3)
+branch="phase-$num-$slug"
+
+if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+  echo "phase branch '$branch' does not exist" >&2
+  exit 18
+fi
+
+head_sha=$(git rev-parse "refs/heads/$branch")
+if ! verified_sha=$(git rev-parse --verify --quiet "$verified^{commit}"); then
+  echo "verified SHA '$verified' is not a commit in this repository" >&2
+  exit 19
+fi
+if [ "$head_sha" != "$verified_sha" ]; then
+  echo "phase branch '$branch' is at $(git rev-parse --short "$head_sha"), not the verified $(git rev-parse --short "$verified_sha"): verify again before merging" >&2
+  exit 19
+fi
+
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+if [ -f "$ledger" ] && grep -q "^phase $num: merged to base (" "$ledger"; then
+  echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
+  exit 17
+fi
+
+# Preflight re-checks the ledger identity and puts the tree on base.
+"$here/phase-preflight" "$doc" "$base" "$num" >/dev/null
+
+if ! git merge --no-ff "$branch" -m "merge: phase $num — $title" >/dev/null 2>&1; then
+  git merge --abort >/dev/null 2>&1 || true
+  git switch "$branch" >/dev/null 2>&1 || true
+  echo "merge of '$branch' into '$base' failed; aborted, base unchanged, now on '$branch'" >&2
+  exit 20
+fi
+
+merged=$(git rev-parse --short HEAD)
+printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+echo "phase $num merged to $base ($merged)"
