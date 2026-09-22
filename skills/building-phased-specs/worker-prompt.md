@@ -82,6 +82,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - Do NOT switch branches, create branches, merge, rebase, or push.
     - Stay inside your assignment. If you notice a problem elsewhere, mention
       it in your report; do not fix it.
+    - Build what the assignment asks, at the size it asks. A fix is the
+      smallest change that resolves the finding as written; hardening,
+      options and edge cases the finding does not name go in your report as
+      suggestions, not into the code.
     - Do not tick checkboxes in the brief. The phase lead owns the brief.
 
     ## Return contract

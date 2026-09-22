@@ -92,6 +92,7 @@ has worker-prompt.md 'exit code' 'judges checks by exit code'
 has worker-prompt.md 'Returning DONE with a failing check is not a valid return' 'no DONE on red'
 has worker-prompt.md 'Commit on PHASE_BRANCH' 'the worker commits'
 has worker-prompt.md 'affects: task' 'reports effects on later tasks'
+has worker-prompt.md 'smallest change that resolves the finding' 'a fix stays the size of its finding'
 has worker-prompt.md 'six lines' 'return contract is capped'
 
 # --- reviewer-prompt.md ----------------------------------------------------
