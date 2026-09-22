@@ -1,59 +1,74 @@
-# orchestrating-phased-specs
+# Phased-spec skills
 
-A Claude Code and Codex skill that runs multiple phases of a phased design document end to end:
-per phase it writes an implementation plan, executes it with
-`superpowers:subagent-driven-development`, verifies the result, and merges it into a
-base branch — unattended.
+Two Claude Code and Codex skills that run the phases of a phased design document
+end to end, unattended, one branch per phase, merging each into a base branch:
 
-This repository **is** the skill: `SKILL.md` and `scripts/` live at the root.
+| Skill | Use it for | Per phase |
+|---|---|---|
+| `building-phased-specs` | Design documents that are already researched and decided — the everyday path | a scout grounds the phase and writes a short brief; a phase lead has one worker build each task, one reviewer review the branch, and a fix wave apply the accepted findings; a verifier checks gates and deliverables |
+| `orchestrating-phased-specs` | Exploratory specs that benefit from a full implementation plan | writes a Superpowers plan, executes it with `subagent-driven-development`, verifies |
+
+Both share the scripts in `shared/scripts/`, keep a resumable ledger, run exactly
+one repair attempt per phase, and end at a report — nothing pushed, no PR opened.
+Each skill keeps its runs in its own run directory
+(`.superpowers/phase-builder/` and `.superpowers/phase-orchestrator/`).
 
 ## Install
 
 ```bash
-./install.sh        # Claude Code (existing default)
-./install.sh codex  # Codex
-./install.sh all    # Both hosts
+./install.sh                      # both skills, Claude Code
+./install.sh claude building      # one skill
+./install.sh codex                # both skills, Codex
+./install.sh all all              # both skills, both hosts
 ```
 
-Symlinks the selected host's skill folder at this checkout, so edits here are live
-and the skill stays git-tracked. Claude uses `~/.claude/skills`; Codex uses
-`~/.agents/skills`. Override those parent directories with `CLAUDE_SKILLS_DIR` or
-`CODEX_SKILLS_DIR`, respectively. Existing non-symlink destinations are preserved.
-Refresh skill discovery or restart the host if the skill is not visible.
+Symlinks `skills/<name>/` into the host's skills directory, so edits here are
+live. Claude uses `~/.claude/skills`; Codex uses `~/.agents/skills`. Override
+those with `CLAUDE_SKILLS_DIR` or `CODEX_SKILLS_DIR`. Re-running the installer
+over an older install that linked the repository root repoints it. Existing
+non-symlink destinations are preserved. Refresh skill discovery or restart the
+host if a skill is not visible.
 
-Install Superpowers in each host too. Read [platform-guide.md](platform-guide.md)
-for dispatch/model mapping, required Superpowers helpers, nested-agent capability,
-and permissions. This workflow needs controller → executor → worker nesting and
-shared access to one checkout. It does not grant permissions or modify host settings.
+`orchestrating-phased-specs` also needs Superpowers installed.
+`building-phased-specs` needs nothing beyond Bash, Git and nested agents. Read
+each skill's `platform-guide.md` for dispatch, model mapping and permissions.
 
-In either host, invoke the skill with the design document, phases, and base branch:
+## Invoke
 
-> Use orchestrating-phased-specs to work on phases 2 to 6 of
-> docs/superpowers/specs/example-design.md on branch feat/example.
+Invoking by name is deterministic:
 
-Scripts resolve from the installed skill directory; their working directory must
-be the target repository. `phase-start` creates or resumes a phase branch after
-preflight. Preflight preserves the existing run directory layout and refuses a
-ledger belonging to another spec or base instead of reusing its progress.
+```
+/building-phased-specs phases 2 to 6 of docs/specs/example-design.md on branch feat/example
+/orchestrating-phased-specs phases 2 to 6 of docs/specs/example-design.md on branch feat/example
+```
 
-## Status
+In Codex, mention the skill as `$building-phased-specs`. With looser wording —
+"work on phases 2 to 6 of …" — the descriptions route to
+`building-phased-specs`; `orchestrating-phased-specs` fires only when you ask for
+plan-driven execution ("… with plans") or name it.
 
-Built in one pass against `docs/superpowers/specs/2026-08-03-orchestrating-phased-specs-design.md`.
+## Layout
 
-| Piece | State |
-|---|---|
-| `scripts/parse-phases`, `scripts/phase-run-dir`, `scripts/phase-preflight`, `scripts/phase-start` | done, unit-tested |
-| `planner-prompt.md`, `executor-prompt.md`, `verifier-prompt.md`, `repair-prompt.md` | done, structurally tested |
-| `SKILL.md` — the orchestration loop | done, structurally tested |
-
-**Not yet proven end to end.** The shell suite verifies installation and Git-state behavior in temporary
-repositories, not real model dispatch. A live multi-phase run and interrupted
-resume still need validation in each host. See the spec's §9 for the limits it ships with.
+```
+shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish
+shared/scripts/__tests__ the shell test suite for scripts, installer and both skills
+skills/<name>/           SKILL.md, dispatch templates, platform guide
+skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace
+docs/superpowers/specs/  the design documents for both skills
+```
 
 ## Tests
 
 ```bash
-bash scripts/__tests__/run-tests.sh
+bash shared/scripts/__tests__/run-tests.sh
+shellcheck shared/scripts/* skills/*/scripts/* install.sh shared/scripts/__tests__/*.sh
 ```
 
-No test framework, no package manager — plain bash. `shellcheck` is used for linting.
+No test framework, no package manager — plain bash.
+
+## Status
+
+The shell suite verifies scripts, installation and Git-state behaviour in
+temporary repositories, and checks both skills' templates structurally. Live
+multi-phase runs are the real verification; see each design document's
+verification sections.

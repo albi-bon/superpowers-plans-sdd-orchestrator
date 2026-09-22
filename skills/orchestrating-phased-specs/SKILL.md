@@ -1,6 +1,6 @@
 ---
 name: orchestrating-phased-specs
-description: Use when the user asks to run multiple phases of a phased design document or spec — e.g. "let's work on phases 2 to 6 of a spec" — orchestrating plan-writing and subagent-driven execution per phase across a base branch.
+description: Use when the user explicitly asks for plan-driven execution of a phased design document or spec — writing a Superpowers implementation plan per phase and running it with subagent-driven-development, e.g. "work on phases 2 to 6 of <spec> with plans" — or names this skill. For running phases directly from the document, use building-phased-specs instead.
 ---
 
 # Orchestrating Phased Specs

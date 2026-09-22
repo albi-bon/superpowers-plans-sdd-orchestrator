@@ -31,8 +31,8 @@ because an existing one is taking time; reconcile its status and persisted outpu
 
 ## Claude Code
 
-Installation: `./install.sh` or `./install.sh claude` links this checkout into
-`~/.claude/skills/orchestrating-phased-specs`. `CLAUDE_SKILLS_DIR` overrides the
+Installation: `./install.sh` or `./install.sh claude orchestrating` links
+`skills/orchestrating-phased-specs/` into `~/.claude/skills/orchestrating-phased-specs`. `CLAUDE_SKILLS_DIR` overrides the
 parent destination for tests or a project installation.
 
 Use the exposed Agent tool (Task on older hosts) with a general-purpose agent,
@@ -53,7 +53,7 @@ change this setting automatically. See [Claude Code subagents](https://code.clau
 
 ## Codex
 
-Installation: `./install.sh codex` links this checkout into
+Installation: `./install.sh codex orchestrating` links the skill into
 `~/.agents/skills/orchestrating-phased-specs`. `CODEX_SKILLS_DIR` overrides the
 parent destination. `./install.sh all` installs both hosts. Restart or refresh
 skill discovery if the skill does not appear. See [Codex skills](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).
