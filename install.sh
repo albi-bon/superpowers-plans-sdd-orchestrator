@@ -8,18 +8,18 @@
 # repointed like any other stale link.
 #
 # CLAUDE_SKILLS_DIR and CODEX_SKILLS_DIR override their respective destinations.
-# With no arguments, install both skills for Claude Code.
+# With no arguments, install every skill for Claude Code.
 #
 # `pwd -P` throughout, never a bare `pwd`: bash's `cd` keeps the logical path it
 # was given, so `cd "$dest" && pwd` on an existing symlink prints the symlink's
 # own path rather than what it points at — and the already-installed check would
 # then never match.
 #
-# Usage: ./install.sh [claude|codex|all] [orchestrating|building|all]
+# Usage: ./install.sh [claude|codex|all] [orchestrating|building|executing|all]
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [claude|codex|all] [orchestrating|building|all]" >&2
+  echo "usage: $0 [claude|codex|all] [orchestrating|building|executing|all]" >&2
   exit 2
 }
 
@@ -35,7 +35,8 @@ esac
 case "$which" in
   orchestrating) skills="orchestrating-phased-specs" ;;
   building) skills="building-phased-specs" ;;
-  all) skills="orchestrating-phased-specs building-phased-specs" ;;
+  executing) skills="executing-phased-specs" ;;
+  all) skills="orchestrating-phased-specs building-phased-specs executing-phased-specs" ;;
   *) usage ;;
 esac
 

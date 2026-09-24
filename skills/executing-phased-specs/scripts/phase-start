@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Run the shared phase-start under this skill's run-directory namespace, so the skills
+# in this repository never read or write each other's ledger. The
+# namespace is set here rather than by the controller, which could forget it
+# after its context is compacted. `pwd -P` resolves the installed skill
+# symlink to this checkout, where shared/ lives.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd -P)
+export PHASE_RUN_NAMESPACE=phase-executor
+exec "$here/../../../shared/scripts/phase-start" "$@"
