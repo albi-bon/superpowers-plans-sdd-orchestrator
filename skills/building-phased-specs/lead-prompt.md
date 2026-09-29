@@ -71,8 +71,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     ## Dispatching
 
     Substitute every uppercase placeholder in a template before you dispatch
-    it. Apply the platform guide: name the model explicitly — the most capable
-    tier for every worker and for the reviewer, with no exceptions — give each
+    it. Apply the platform guide: name the model explicitly — the mid-tier for
+    a task worker whose brief task says `Tier: mechanical`, and the most
+    capable tier for every other worker, every fix worker and the reviewer.
+    Never downgrade a task the brief marks `standard`. Give each
     dispatch its repository path and fresh context, and run them one at a
     time. Wait for each to finish before the next. A worker that returns
     BLOCKED for a reason the decision policy does not list gets re-dispatched

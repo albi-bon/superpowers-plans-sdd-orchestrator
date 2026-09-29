@@ -89,10 +89,25 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - **Done when:** <observable behaviours, one per line>
     - **Test focus:** <which behaviours need tests; edge and error cases the document names>
     - **Notes:** <what you found while grounding that the worker must know>
+    - **Tier:** <mechanical or standard, under the rule below>
 
     ### - [ ] Task 2 — <title>
     …
     ~~~
+
+    ## Task tier
+
+    Mark a task `Tier: mechanical` only when every statement below is true.
+    Otherwise mark it `Tier: standard`.
+
+    - Its Notes name an existing file in the repository whose pattern the task
+      copies: the same shape of change, applied to new names or data.
+    - Its Produces line is "nothing public", or lists only names that follow
+      that pattern exactly.
+    - No Drift row with a significant resolution touches its files.
+    - It does not touch security, authentication, concurrency, persistence
+      schemas or migrations, money, or error-recovery paths.
+    - Its Done when lines are checkable by one obvious test each.
 
     ## Return contract
 

@@ -96,7 +96,9 @@ using absolute paths, and **name the model explicitly** on every dispatch.
 | ③ | verifier | `verifier-prompt.md` | mid-tier |
 | — | repair | `repair-prompt.md` | most capable |
 
-The phase lead's own dispatches — every worker and the reviewer — use the most
+The phase lead's own dispatches use the most capable model, except a task
+worker whose brief task says `Tier: mechanical`, which uses the mid-tier. The
+scout assigns the tier; fix workers and the reviewer always use the most
 capable model. Pass it `MODEL_MAPPING`, `PLATFORM_GUIDE_PATH`, and the absolute
 paths of both templates it dispatches and both policy files.
 
@@ -238,7 +240,7 @@ State these to your human partner when they matter.
 |--------|---------|
 | "I'll read the brief to check the scout did it right" | The verifier checks the result against the document. A brief in your context stays there for every remaining phase. |
 | "The lead is blocked on a design question — I'll ask the user" | Design questions are the lead's to decide and record. Only the decision policy's four cases block. |
-| "This task is simple, a smaller model will do" | Every worker uses the most capable model. No exceptions. |
+| "This task is simple, a smaller model will do" | Only the scout's `Tier: mechanical` mark selects the mid-tier. The lead never downgrades a `standard` task or a fix. |
 | "The verifier's FAIL looks like a flake, I'll just merge" | The verifier reads exit codes; you did not run the command. One repair, then halt. |
 | "Repair almost worked, one more round" | Exactly one. Past it, the failure is structural. |
 | "I'll fix this small thing myself" | Controller fixes skip verification and pollute your context. Dispatch it. |

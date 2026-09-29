@@ -30,11 +30,14 @@ because an existing one is taking time; reconcile its status and persisted outpu
 
 | Role | Tier |
 |---|---|
-| scout, phase lead, worker (every task and every fix), reviewer, repair | most capable |
+| scout, phase lead, reviewer, repair | most capable |
+| worker: task the brief marks `Tier: standard`, and every fix | most capable |
+| worker: task the brief marks `Tier: mechanical` | mid-tier |
 | verifier | mid-tier |
 
-There is no cheap tier in this workflow. Workers use the most capable tier for
-every task, including ones that look mechanical.
+There is no cheap tier in this workflow. The scout assigns each task's tier
+under the criteria in `scout-prompt.md`; the lead applies it and does not
+downgrade a `standard` task. Fix-wave workers always use the most capable tier.
 
 ## Claude Code
 
@@ -71,8 +74,9 @@ workers. Tool names and fields vary by Codex surface:
   notifications and wait tools.
 - With another native `spawn_agent` schema, use its declared message, model,
   context, wait, and lifecycle fields. Never pass fields from the other schema.
-- Choose the strongest available model for every role but the verifier, and a
-  capable mid-tier model for the verifier. Resolve actual IDs from the live tool
+- Choose the strongest available model for every most-capable role in the
+  table above, and a capable mid-tier model for the verifier and for
+  `Tier: mechanical` task workers. Resolve actual IDs from the live tool
   schema or session configuration; do not hard-code a model generation. If
   explicit model selection is unavailable, inherit and record that fact.
 
