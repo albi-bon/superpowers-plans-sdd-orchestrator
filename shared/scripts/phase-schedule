@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Decide what a parallel run does next, from the ledger and graph.tsv alone.
+# Never mutates anything: the controller calls it after every event, and a
+# controller whose context was compacted gets the same answer as one that
+# remembers everything.
+#
+# Prints one action per line, in this order:
+#   land <N> <sha>       an open integration passed; land it (phase-land)
+#   integrate <N> <sha>  no integration is open; integrate the phase that
+#                        reached 'verified PASS' first
+#   rescout <N>          a held phase's blocker has merged (phase-worktree
+#                        refresh, then the scout)
+#   start <N>            every dependency is merged or outside the range
+#                        (phase-worktree start, then the scout)
+#   wait                 something is in flight: wait for the next return
+#   done                 nothing is in flight and nothing can start
+#
+# At most one land or integrate, never while another integration is open.
+# rescout and start respect CAP, count against it, and are never emitted
+# while the run is draining. Phases are considered in ascending numeric
+# order. A held phase runs no agent and does not count against CAP.
+#
+# Usage: phase-schedule DESIGN_DOC BASE RANGE CAP
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+  echo "usage: phase-schedule DESIGN_DOC BASE RANGE CAP" >&2
+  exit 2
+fi
+doc=$1
+range=$3
+cap=$4
+case "$cap" in
+  '' | *[!0-9]* | 0) echo "cap must be a positive integer" >&2; exit 2 ;;
+esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+rundir=$("$here/phase-run-dir" "$doc")
+graph="$rundir/graph.tsv"
+if [ ! -f "$graph" ]; then
+  echo "no graph at $graph: run parse-deps --write first" >&2
+  exit 2
+fi
+
+requested=$("$here/parse-phases" "$doc" "$range" | cut -f1 | tr '\n' ' ')
+state=$("$here/phase-state" "$doc")
+
+REQUESTED=$requested STATE=$state CAP=$cap awk -F'\t' '
+  BEGIN {
+    k = split(ENVIRON["REQUESTED"], req, " ")
+    for (i = 1; i <= k; i++) if (req[i] != "") { want[req[i]] = 1; order[++nreq] = req[i] }
+    k = split(ENVIRON["STATE"], rows, "\n")
+    for (i = 1; i <= k; i++) {
+      split(rows[i], f, "\t")
+      if (f[1] == "run") { draining = (f[2] == "draining"); continue }
+      st[f[1]] = f[2]; arg[f[1]] = f[3]; nr[f[1]] = f[4] + 0
+    }
+    cap = ENVIRON["CAP"] + 0
+  }
+  { deps[$1] = $2 }
+  # Reading st[n] for a missing n would create it, and then "n in st" would
+  # call an unstarted phase started. Every lookup goes through status().
+  function status(n) { return (n in st) ? st[n] : "" }
+  function busy(s) { return s == "active" || s == "verified" || s == "integrating" || s == "landable" }
+  function ready(n,   m, d, j) {
+    if (deps[n] == "" || deps[n] == "-") return 1
+    m = split(deps[n], d, ",")
+    for (j = 1; j <= m; j++) if ((d[j] in want) && status(d[j]) != "merged") return 0
+    return 1
+  }
+  END {
+    inflight = 0; open = 0; best = ""
+    for (n in st) {
+      if (st[n] == "integrating" || st[n] == "landable") open = 1
+      if (st[n] == "landable") print "land " n " " arg[n]
+      if ((n in want) && busy(st[n])) inflight++
+      if (st[n] == "verified" && (best == "" || nr[n] < nr[best])) best = n
+    }
+    if (!open && best != "") print "integrate " best " " arg[best]
+
+    if (!draining) {
+      for (i = 1; i <= nreq; i++) {
+        n = order[i]
+        if (inflight >= cap) break
+        if (status(n) == "held") {
+          if (status(arg[n]) == "merged") { print "rescout " n; inflight++ }
+          continue
+        }
+        if (!(n in st) && ready(n)) { print "start " n; inflight++ }
+      }
+    }
+    print (inflight > 0 ? "wait" : "done")
+  }
+' "$graph"

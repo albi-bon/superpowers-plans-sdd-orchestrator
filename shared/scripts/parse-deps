@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# Read a phased design document's dependency graph from per-phase
+# "Depends on" lines, or validate and record a graph the graph agent wrote.
+#
+# A phase section runs from its heading (the same heading rule parse-phases
+# uses) to the next phase heading. The first line in it that reads, after
+# dropping '*', '_' and a leading list bullet, case-insensitively,
+# "depends on: <list>" is that phase's declaration. <list> is "none" or phase
+# numbers separated by commas, spaces or "and", each optionally prefixed with
+# "phase". Anything else — a range, a parenthetical — makes the line
+# unparseable, and the document is then treated as having no Depends on lines
+# at all, so the graph agent reads it whole rather than this script half-reading it.
+#
+# When at least one phase declares its dependencies, a phase that does not
+# depends on the phase with the next lower number in the document: missing
+# lines never create parallelism the author did not declare.
+#
+# Output, one line per phase, ascending:  number<TAB>deps<TAB>source
+#   deps    comma-separated ascending numbers, or '-'
+#   source  'line', 'default' or 'agent'
+#
+# Modes:
+#   parse-deps DESIGN_DOC          print the graph read from the document
+#   parse-deps --write DESIGN_DOC  ensure <run-dir>/graph.tsv exists and is
+#                                  valid, record it in the ledger once, and
+#                                  print the one-line summary. An existing
+#                                  graph.tsv (from an earlier run or the graph
+#                                  agent) is validated and reused, never
+#                                  regenerated.
+#
+# Exit codes:
+#   0  ok
+#   2  usage error or unreadable document
+#   3  the document contains no phase headings
+#   5  no parseable Depends on lines: dispatch the graph agent
+#   6  invalid graph: a cycle, a self-dependency, an unknown phase, or a
+#      graph.tsv that does not list every phase exactly once
+set -euo pipefail
+
+usage() {
+  echo "usage: parse-deps [--write] DESIGN_DOC" >&2
+  exit 2
+}
+
+write=0
+if [ "$#" -eq 2 ] && [ "$1" = "--write" ]; then
+  write=1
+  shift
+fi
+[ "$#" -eq 1 ] || usage
+doc=$1
+if [ ! -f "$doc" ]; then
+  echo "no such design document: $doc" >&2
+  exit 2
+fi
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+# Phase numbers as parse-phases reads them; it also owns the no-headings exit.
+set +e
+phases=$("$here/parse-phases" "$doc" 2>&1)
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+  printf '%s\n' "$phases" >&2
+  exit "$rc"
+fi
+numbers=$(printf '%s\n' "$phases" | cut -f1)
+
+# Print number<TAB>raw-deps for every phase whose section declares them, where
+# raw-deps is a comma list, '' for none, or '?' for an unparseable line. The
+# heading test mirrors parse-phases; see its portability notes.
+declared() {
+  awk '
+    function heading_number(line,   hashes, rest, num, after, sep, seplen, i, p, lead, title) {
+      hashes = 0
+      while (substr(line, hashes + 1, 1) == "#") hashes++
+      if (hashes < 2 || hashes > 4) return ""
+      rest = substr(line, hashes + 1)
+      sub(/^[[:space:]]+/, "", rest)
+      if (rest !~ /^Phase[[:space:]]+[0-9]/) return ""
+      sub(/^Phase[[:space:]]+/, "", rest)
+      num = rest
+      sub(/[^0-9].*$/, "", num)
+      if (num == "") return ""
+      after = substr(rest, length(num) + 1)
+      sep = 0
+      seplen = 0
+      split("— – -", dashes, " ")
+      for (i = 1; i <= 3; i++) {
+        p = index(after, dashes[i])
+        if (p > 0 && (sep == 0 || p < sep)) { sep = p; seplen = length(dashes[i]) }
+      }
+      if (sep == 0) return ""
+      lead = substr(after, 1, sep - 1)
+      if (lead !~ /^[[:space:]]*$/) return ""
+      title = substr(after, sep + seplen)
+      if (title !~ /[a-zA-Z0-9]/) return ""
+      return num
+    }
+    {
+      n = heading_number($0)
+      if (n != "") {
+        # A duplicate heading number belongs to the first heading only.
+        if (n in seen) { cur = ""; next }
+        seen[n] = 1
+        cur = n
+        next
+      }
+      if (cur == "" || (cur in done)) next
+
+      l = tolower($0)
+      gsub(/[*_]/, "", l)
+      sub(/^[[:space:]]+/, "", l)
+      sub(/^[-+][[:space:]]+/, "", l)
+      if (l !~ /^depends[[:space:]]+on[[:space:]]*:/) next
+      done[cur] = 1
+
+      sub(/^depends[[:space:]]+on[[:space:]]*:/, "", l)
+      sub(/[[:space:]]+$/, "", l)
+      sub(/\.$/, "", l)
+      gsub(/[[:space:]]+/, " ", l)
+      sub(/^ /, "", l)
+
+      if (l == "none" || l == "nothing" || l == "-") { printf "%s\t\n", cur; next }
+
+      # Every word must be a number, "phase(s)" or "and"; commas separate.
+      gsub(/,/, " ", l)
+      count = split(l, words, " ")
+      out = ""
+      bad = 0
+      for (i = 1; i <= count; i++) {
+        w = words[i]
+        if (w == "" || w == "phase" || w == "phases" || w == "and") continue
+        if (w ~ /^[0-9]+$/) { out = out (out == "" ? "" : ",") w; continue }
+        bad = 1
+      }
+      if (bad || out == "") { printf "%s\t?\n", cur; next }
+      printf "%s\t%s\n", cur, out
+    }
+  ' "$1"
+}
+
+# Validate a graph read from stdin (number<TAB>deps<TAB>source) against the
+# document's phase numbers. Prints the graph normalised (deps sorted, unique)
+# or exits 6 with every problem on stderr.
+validate() {
+  awk -F'\t' -v nums="$(printf '%s' "$numbers" | tr '\n' ' ')" '
+    BEGIN {
+      k = split(nums, list, " ")
+      for (i = 1; i <= k; i++) if (list[i] != "") { known[list[i]] = 1; order[++nn] = list[i] }
+      bad = 0
+    }
+    NF == 0 || $0 ~ /^[[:space:]]*$/ { next }
+    {
+      n = $1
+      if (!(n in known)) { print "graph names phase " n ", which the document does not have" > "/dev/stderr"; bad = 1; next }
+      if (n in seen) { print "graph lists phase " n " more than once" > "/dev/stderr"; bad = 1; next }
+      seen[n] = 1
+      src[n] = ($3 == "" ? "agent" : $3)
+      deps[n] = ""
+      if ($2 == "-" || $2 == "") next
+      m = split($2, d, ",")
+      for (i = 1; i <= m; i++) {
+        x = d[i]
+        gsub(/[^0-9]/, "", x)
+        if (x == "") continue
+        if (x == n) { print "phase " n " depends on itself" > "/dev/stderr"; bad = 1; continue }
+        if (!(x in known)) { print "phase " n " depends on phase " x ", which the document does not have" > "/dev/stderr"; bad = 1; continue }
+        if (index("," deps[n] ",", "," x ",") == 0) deps[n] = deps[n] (deps[n] == "" ? "" : ",") x
+      }
+    }
+    END {
+      for (i = 1; i <= nn; i++) if (!(order[i] in seen)) { print "graph does not list phase " order[i] > "/dev/stderr"; bad = 1 }
+      if (bad) exit 6
+
+      # Kahn: repeatedly remove phases whose deps are all removed.
+      left = nn
+      do {
+        progress = 0
+        for (i = 1; i <= nn; i++) {
+          n = order[i]
+          if (n in gone) continue
+          ok = 1
+          if (deps[n] != "") {
+            m = split(deps[n], d, ",")
+            for (j = 1; j <= m; j++) if (!(d[j] in gone)) { ok = 0; break }
+          }
+          if (ok) { gone[n] = 1; left--; progress = 1 }
+        }
+      } while (progress && left > 0)
+      if (left > 0) {
+        cyc = ""
+        for (i = 1; i <= nn; i++) if (!(order[i] in gone)) cyc = cyc " " order[i]
+        print "dependency cycle among phases:" cyc > "/dev/stderr"
+        exit 6
+      }
+
+      for (i = 1; i <= nn; i++) {
+        n = order[i]
+        out = "-"
+        if (deps[n] != "") {
+          m = split(deps[n], d, ",")
+          # Insertion sort, numeric.
+          for (a = 2; a <= m; a++) { v = d[a]; b = a - 1; while (b >= 1 && d[b] + 0 > v + 0) { d[b + 1] = d[b]; b-- } d[b + 1] = v }
+          out = d[1]
+          for (a = 2; a <= m; a++) out = out "," d[a]
+        }
+        printf "%s\t%s\t%s\n", n, out, src[n]
+      }
+    }
+  '
+}
+
+# Build the graph from the document. Exit 5 when the graph agent is needed.
+from_document() {
+  local decl
+  decl=$(declared "$doc")
+  if [ -z "$decl" ] || printf '%s\n' "$decl" | awk -F'\t' '$2 == "?" { found = 1 } END { exit !found }'; then
+    if [ -n "$decl" ]; then
+      echo "unparseable Depends on line in phase(s): $(printf '%s\n' "$decl" | awk -F'\t' '$2 == "?" { printf "%s ", $1 }')" >&2
+    fi
+    echo "no parseable Depends on lines in $doc: dispatch the graph agent" >&2
+    exit 5
+  fi
+  printf '%s\n' "$numbers" | DECL=$decl awk -F'\t' '
+    BEGIN {
+      k = split(ENVIRON["DECL"], rows, "\n")
+      for (i = 1; i <= k; i++) {
+        split(rows[i], f, "\t")
+        has[f[1]] = 1
+        dep[f[1]] = f[2]
+      }
+    }
+    {
+      n = $1
+      if (n in has) printf "%s\t%s\tline\n", n, (dep[n] == "" ? "-" : dep[n])
+      else printf "%s\t%s\tdefault\n", n, (prev == "" ? "-" : prev)
+      prev = n
+    }
+  ' | validate
+}
+
+summary() {
+  awk -F'\t' '
+    {
+      d = ($2 == "-" ? "" : $2)
+      line = line (line == "" ? "" : " ") $1 "→{" d "}"
+      if ($3 == "agent") s["agent"] = 1
+      else if ($3 == "line") s["line"] = 1
+      else s["default"] = 1
+    }
+    END {
+      src = ("agent" in s) ? "agent" : (("line" in s) ? "line" : "default")
+      printf "graph: %s (source: %s)\n", line, src
+    }
+  ' "$1"
+}
+
+if [ "$write" -eq 0 ]; then
+  from_document
+  exit 0
+fi
+
+rundir=$("$here/phase-run-dir" "$doc")
+graph="$rundir/graph.tsv"
+ledger="$rundir/run.md"
+
+if [ -f "$graph" ]; then
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  validate < "$graph" > "$tmp"
+  cp "$tmp" "$graph"
+else
+  out=$(from_document)
+  printf '%s\n' "$out" > "$graph"
+fi
+
+line=$(summary "$graph")
+if [ -f "$ledger" ] && ! grep -q '^graph: ' "$ledger"; then
+  printf '%s\n' "$line" >> "$ledger"
+fi
+printf '%s\n' "$line"

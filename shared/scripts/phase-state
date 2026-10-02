@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Read a parallel run's ledger and print where every started phase stands.
+# phase-schedule and phase-overlap both call this, so the two can never
+# disagree about which phases are in flight, held, waiting or done.
+#
+# Output: one 'run' line, then one line per phase that has a ledger line,
+# ascending by number:
+#
+#   run<TAB>draining|normal
+#   <N><TAB><status><TAB><arg><TAB><ledger line number>
+#
+# Statuses, decided from the phase's ledger lines ('<role> dispatched' lines
+# are progress markers and never change a status):
+#   merged       a 'merged to base (<sha>)' line exists; arg is the sha
+#   failed       its last line is 'failed — …'
+#   landable     integration is open and the last line is
+#                'integration verified PASS <sha>' or an 'integrating — …
+#                ready <sha>' line; arg is the sha
+#   integrating  integration is open (an 'integrating' line after the last
+#                'failed' line), anything else
+#   held         last line 'held — waits on phase <M> …'; arg is M
+#   verified     last line 'verified PASS <sha>'; arg is the sha; the line
+#                number orders the integration queue
+#   active       anything else: started and working
+#
+# The run is draining when its last 'run: draining' line has no later
+# 'run: undrained' line.
+#
+# Usage: phase-state DESIGN_DOC
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: phase-state DESIGN_DOC" >&2
+  exit 2
+fi
+
+here=$(cd "$(dirname "$0")" && pwd)
+rundir=$("$here/phase-run-dir" "$1")
+ledger="$rundir/run.md"
+
+if [ ! -f "$ledger" ]; then
+  printf 'run\tnormal\n'
+  exit 0
+fi
+
+awk '
+  /^run: draining/ { drain = NR }
+  /^run: undrained/ { undrain = NR }
+  /^phase [0-9]+: / {
+    n = $2
+    sub(/:$/, "", n)
+    body = $0
+    sub(/^phase [0-9]+: /, "", body)
+    if (body ~ / dispatched$/) next
+    if (!(n in seen)) { seen[n] = 1; order[++count] = n }
+    last[n] = body
+    lastnr[n] = NR
+    if (body ~ /^merged to base \(/) {
+      s = body
+      sub(/^merged to base \(/, "", s)
+      sub(/\).*$/, "", s)
+      merged[n] = s
+    }
+    if (body ~ /^failed/) failnr[n] = NR
+    if (body ~ /^integrating/) integnr[n] = NR
+  }
+  function lastword(s,   k, w) {
+    k = split(s, w, " ")
+    return w[k]
+  }
+  END {
+    printf "run\t%s\n", ((drain > 0 && drain > undrain) ? "draining" : "normal")
+    # Ascending numeric order.
+    for (a = 2; a <= count; a++) {
+      v = order[a]; b = a - 1
+      while (b >= 1 && order[b] + 0 > v + 0) { order[b + 1] = order[b]; b-- }
+      order[b + 1] = v
+    }
+    for (i = 1; i <= count; i++) {
+      n = order[i]
+      body = last[n]
+      status = "active"; arg = ""
+      open = ((n in integnr) && integnr[n] > failnr[n] + 0)
+      if (n in merged) { status = "merged"; arg = merged[n] }
+      else if (body ~ /^failed/) status = "failed"
+      else if (open) {
+        status = "integrating"
+        if (body ~ /^integration verified PASS /) { status = "landable"; arg = lastword(body) }
+        else if (body ~ /^integrating/ && body ~ / ready [0-9a-f]+$/) { status = "landable"; arg = lastword(body) }
+      }
+      else if (body ~ /^held — waits on phase [0-9]+/) {
+        status = "held"
+        arg = body
+        sub(/^held — waits on phase /, "", arg)
+        sub(/[^0-9].*$/, "", arg)
+      }
+      else if (body ~ /^verified PASS /) { status = "verified"; arg = lastword(body) }
+      printf "%s\t%s\t%s\t%s\n", n, status, arg, lastnr[n]
+    }
+  }
+' "$ledger"
