@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Bring the current base into a verified phase branch, inside the phase's
+# worktree, before the phase lands.
+#
+# Other phases may have landed on base while this one was built. Merging base
+# into the phase branch here — not the phase into base — means conflicts are
+# resolved where the phase's agents work, and base only ever receives a tree
+# that has been verified with everything already on it.
+#
+# Prints exactly one outcome and records it in the ledger:
+#   ready <sha>   base never moved since the fork: land VERIFIED_SHA as is
+#   merged <sha>  base merged in cleanly: run the integration verifier on <sha>
+#   conflict      the merge stopped on conflicts and is left in progress; the
+#                 conflicted paths and the phases merged into base since the
+#                 fork are in <run-dir>/phase-<N>-conflicts.md
+#
+# Idempotent: re-run after an interruption, a merge in progress prints
+# 'conflict' again, and a branch that already contains base reports 'ready'
+# or 'merged' without recording a second integration.
+#
+# Exit codes:
+#   0   one of the outcomes above
+#   2   usage error, or no worktree for the phase
+#   11  worktree not clean
+#   19  the branch HEAD is not VERIFIED_SHA (nor its integration merge)
+#   20  the merge failed for a reason other than conflicts; it was aborted
+#
+# Usage: phase-integrate DESIGN_DOC BASE N VERIFIED_SHA
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+  echo "usage: phase-integrate DESIGN_DOC BASE N VERIFIED_SHA" >&2
+  exit 2
+fi
+doc=$1
+base=$2
+num=$3
+verified=$4
+case "$num" in '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;; esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+conflicts="$rundir/phase-$num-conflicts.md"
+wt=$("$here/phase-worktree" "$doc" "$base" path "$num")
+if [ ! -d "$wt" ]; then
+  echo "no worktree for phase $num at $wt" >&2
+  exit 2
+fi
+
+open() { # is an integration already recorded and not closed by a failure?
+  "$here/phase-state" "$doc" | awk -F'\t' -v n="$num" '$1 == n && ($2 == "integrating" || $2 == "landable") { found = 1 } END { exit !found }'
+}
+record() { open || printf 'phase %s: integrating — %s\n' "$num" "$1" >> "$ledger"; }
+
+if git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  echo conflict
+  exit 0
+fi
+if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+  echo "worktree not clean: $wt" >&2
+  exit 11
+fi
+if ! verified_sha=$(git -C "$wt" rev-parse --verify --quiet "$verified^{commit}"); then
+  echo "verified SHA '$verified' is not a commit in this repository" >&2
+  exit 19
+fi
+head=$(git -C "$wt" rev-parse HEAD)
+short=$(git -C "$wt" rev-parse --short HEAD)
+
+if git -C "$wt" merge-base --is-ancestor "$base" HEAD; then
+  if [ "$head" = "$verified_sha" ]; then
+    record "base unchanged, ready $short"
+    echo "ready $short"
+    exit 0
+  fi
+  subject=$(git -C "$wt" log -1 --format=%s HEAD)
+  if git -C "$wt" merge-base --is-ancestor "$verified_sha" HEAD \
+    && [ "$subject" = "integrate: base into phase $num" ]; then
+    record "base moved, clean merge $short"
+    echo "merged $short"
+    exit 0
+  fi
+  echo "phase $num HEAD $short is neither the verified commit nor its integration merge: verify again" >&2
+  exit 19
+fi
+
+if [ "$head" != "$verified_sha" ]; then
+  echo "phase $num HEAD $short is not the verified $(git -C "$wt" rev-parse --short "$verified_sha"): verify again before integrating" >&2
+  exit 19
+fi
+
+fork=$(git -C "$wt" merge-base "$base" HEAD)
+landed=$(git -C "$wt" log --first-parent --format=%s "$fork..$base" \
+  | sed -n 's/^merge: phase \([0-9][0-9]*\) — .*/\1/p' | sort -n | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+moved="base moved (phase ${landed:-none recorded})"
+
+if git -C "$wt" merge -q --no-ff "$base" -m "integrate: base into phase $num" >/dev/null 2>&1; then
+  short=$(git -C "$wt" rev-parse --short HEAD)
+  record "$moved, clean merge $short"
+  echo "merged $short"
+  exit 0
+fi
+
+if ! git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  git -C "$wt" merge --abort >/dev/null 2>&1 || true
+  echo "merge of '$base' into phase $num failed without conflicts; aborted" >&2
+  exit 20
+fi
+
+files=$(git -C "$wt" diff --name-only --diff-filter=U)
+count=$(printf '%s\n' "$files" | grep -c . || true)
+{
+  printf '# Phase %s — integration conflicts\n\n' "$num"
+  printf 'Merging %s into phase %s stopped on conflicts. The merge is in progress in\n%s.\n\n' "$base" "$num" "$wt"
+  printf '## Phases merged into base since this phase began\n\n'
+  if [ -n "$landed" ]; then
+    printf '%s\n' "$landed" | tr ',' '\n' | sed 's/^ *//; s/^/- phase /'
+  else
+    printf -- '- none recorded\n'
+  fi
+  printf '\n## Conflicted paths\n\n'
+  printf '%s\n' "$files" | sed 's/^/- /'
+} > "$conflicts"
+record "$moved, conflict in $count files"
+echo conflict

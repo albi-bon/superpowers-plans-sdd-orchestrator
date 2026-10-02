@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Manage the git worktrees a parallel run builds its phases in.
+#
+# Every phase gets branch phase-<N>-<slug> checked out at
+# <main checkout>/.worktrees/phase-<N>-<slug>/. The main checkout itself stays
+# on the base branch for the whole run and is never switched by this script.
+# .worktrees/ ignores itself with a '*' .gitignore, the same technique
+# phase-run-dir uses, so nothing under .git/ is edited by hand and no tracked
+# file changes.
+#
+# Subcommands:
+#   start N    create the branch off BASE and its worktree, and append
+#              'phase N: started — …'; or re-attach an existing branch the
+#              ledger accounts for (after a prune, if its directory is gone).
+#              Prints the worktree path. Idempotent.
+#   refresh N  fast-forward a held phase's branch to BASE and append
+#              'phase N: released — phase M merged'. Refuses a branch that has
+#              commits of its own: only a phase that has not been built yet
+#              can be moved this way.
+#   check      refuse when any phase worktree is dirty, unless the ledger
+#              shows that phase integrating and the worktree is mid-merge.
+#   remove N   remove a landed phase's worktree; keep its branch.
+#   path N     print the worktree path.
+#
+# Exit codes:
+#   0   ok
+#   2   usage error
+#   11  a worktree is dirty (check, refresh)
+#   14  the phase branch exists and the ledger does not account for it
+#   17  the ledger records the phase as merged (start)
+#   18  the ledger records the phase but its branch is missing (start), or
+#       there is no worktree (refresh, remove)
+#   21  refresh of a branch with commits of its own
+#
+# Usage: phase-worktree DESIGN_DOC BASE start|refresh|remove|path N
+#        phase-worktree DESIGN_DOC BASE check
+set -euo pipefail
+
+usage() {
+  echo "usage: phase-worktree DESIGN_DOC BASE start|refresh|remove|path N" >&2
+  echo "       phase-worktree DESIGN_DOC BASE check" >&2
+  exit 2
+}
+
+[ "$#" -ge 3 ] || usage
+doc=$1
+base=$2
+sub=$3
+num=${4:-}
+case "$sub" in
+  start | refresh | remove | path)
+    [ "$#" -eq 4 ] || usage
+    case "$num" in '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;; esac
+    ;;
+  check) [ "$#" -eq 3 ] || usage ;;
+  *) usage ;;
+esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+# The first entry of 'git worktree list' is always the main checkout, wherever
+# this is called from.
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+wtroot="$main/.worktrees"
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+
+branch_of() {
+  local record
+  record=$("$here/parse-phases" "$doc" "$1")
+  printf 'phase-%s-%s\n' "$1" "$(printf '%s\n' "$record" | cut -f3)"
+}
+
+in_ledger() {
+  [ -f "$ledger" ] && grep -q "^phase ${1}[^0-9]" "$ledger"
+}
+
+registered() { # registered PATH — is a worktree registered at PATH?
+  git worktree list --porcelain | grep -qx "worktree $1"
+}
+
+case "$sub" in
+  path)
+    printf '%s/%s\n' "$wtroot" "$(branch_of "$num")"
+    ;;
+
+  start)
+    branch=$(branch_of "$num")
+    path="$wtroot/$branch"
+    if [ -f "$ledger" ] && grep -q "^phase $num: merged to base (" "$ledger"; then
+      echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
+      exit 17
+    fi
+    mkdir -p "$wtroot"
+    printf '*\n' > "$wtroot/.gitignore"
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+      if ! in_ledger "$num"; then
+        echo "branch '$branch' exists and this run's ledger does not account for it." >&2
+        echo "resume the run that created it, or delete it (git branch -D $branch)" >&2
+        exit 14
+      fi
+      if ! { registered "$path" && [ -d "$path" ]; }; then
+        git worktree prune
+        git worktree add -q "$path" "$branch" >&2
+      fi
+    else
+      if in_ledger "$num"; then
+        echo "ledger records phase $num but branch '$branch' is missing; inspect before resuming" >&2
+        exit 18
+      fi
+      git worktree add -q -b "$branch" "$path" "$base" >&2
+      printf 'phase %s: started — branch %s, worktree .worktrees/%s\n' "$num" "$branch" "$branch" >> "$ledger"
+    fi
+    printf '%s\n' "$path"
+    ;;
+
+  refresh)
+    branch=$(branch_of "$num")
+    path="$wtroot/$branch"
+    if ! [ -d "$path" ]; then
+      echo "no worktree for phase $num at $path: run start first" >&2
+      exit 18
+    fi
+    if [ -n "$(git -C "$path" status --porcelain)" ]; then
+      echo "worktree not clean: $path" >&2
+      exit 11
+    fi
+    if [ "$(git rev-list --count "$base..$branch")" != "0" ]; then
+      echo "phase branch '$branch' has commits of its own; only an unbuilt held phase can be refreshed" >&2
+      exit 21
+    fi
+    git -C "$path" merge -q --ff-only "$base" >&2
+    blocker=$(sed -n "s/^phase $num: held — waits on phase \([0-9][0-9]*\).*/\1/p" "$ledger" | tail -n 1)
+    printf 'phase %s: released — phase %s merged\n' "$num" "${blocker:-?}" >> "$ledger"
+    printf '%s\n' "$path"
+    ;;
+
+  remove)
+    branch=$(branch_of "$num")
+    path="$wtroot/$branch"
+    if [ -d "$path" ]; then
+      git worktree remove "$path"
+    else
+      git worktree prune
+    fi
+    echo "removed worktree of phase $num; branch $branch kept"
+    ;;
+
+  check)
+    [ -d "$wtroot" ] || exit 0
+    state=$("$here/phase-state" "$doc")
+    bad=0
+    for path in "$wtroot"/phase-*; do
+      [ -d "$path" ] || continue
+      registered "$path" || continue
+      [ -n "$(git -C "$path" status --porcelain)" ] || continue
+      n=$(basename "$path" | sed 's/^phase-\([0-9][0-9]*\)-.*/\1/')
+      st=$(printf '%s\n' "$state" | awk -F'\t' -v n="$n" '$1 == n { print $2 }')
+      if git -C "$path" rev-parse -q --verify MERGE_HEAD >/dev/null && [ "$st" = "integrating" ]; then
+        continue
+      fi
+      echo "worktree not clean: $path — an interrupted agent left changes; inspect them (git -C '$path' status)" >&2
+      bad=1
+    done
+    [ "$bad" -eq 0 ] || exit 11
+    ;;
+esac

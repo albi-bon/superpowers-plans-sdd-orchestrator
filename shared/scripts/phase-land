@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Land one verified, integrated phase on the base branch, in the main
+# checkout, and record it.
+#
+# The phase branch already contains the current base tip (phase-integrate saw
+# to that), so the --no-ff merge can neither conflict nor change content: the
+# merge commit's tree must equal the verified commit's tree, and the script
+# checks that it does. Base therefore only ever holds a tree a verifier
+# passed. Checks run before anything moves; on any failure base is put back
+# exactly where it was.
+#
+# Exit codes:
+#   0   landed and recorded
+#   2   usage error
+#   11  main checkout not clean
+#   13  main checkout is not on BASE
+#   17  the ledger already records this phase as merged
+#   18  the phase branch does not exist
+#   19  the phase branch HEAD is not VERIFIED_SHA
+#   20  the merge failed or changed content; base was restored
+#   21  base moved past the verified commit's base: integrate again
+#
+# Usage: phase-land DESIGN_DOC BASE N VERIFIED_SHA
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+  echo "usage: phase-land DESIGN_DOC BASE N VERIFIED_SHA" >&2
+  exit 2
+fi
+doc=$1
+base=$2
+num=$3
+verified=$4
+case "$num" in '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;; esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+
+if [ "$(git -C "$main" branch --show-current)" != "$base" ]; then
+  echo "main checkout $main is not on base '$base' (git switch $base)" >&2
+  exit 13
+fi
+if [ -n "$(git -C "$main" status --porcelain)" ]; then
+  echo "main checkout not clean: the merge would carry unverified changes (git status)" >&2
+  exit 11
+fi
+
+record=$("$here/parse-phases" "$doc" "$num")
+title=$(printf '%s\n' "$record" | cut -f2)
+branch="phase-$num-$(printf '%s\n' "$record" | cut -f3)"
+if ! git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
+  echo "phase branch '$branch' does not exist" >&2
+  exit 18
+fi
+if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit}"); then
+  echo "verified SHA '$verified' is not a commit in this repository" >&2
+  exit 19
+fi
+if [ "$(git -C "$main" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
+  echo "phase branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify again before landing" >&2
+  exit 19
+fi
+
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+if [ -f "$ledger" ] && grep -q "^phase $num: merged to base (" "$ledger"; then
+  echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
+  exit 17
+fi
+
+if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
+  echo "base '$base' moved past what phase $num was integrated with: integrate again" >&2
+  exit 21
+fi
+
+before=$(git -C "$main" rev-parse HEAD)
+if ! git -C "$main" merge -q --no-ff "$branch" -m "merge: phase $num — $title" >/dev/null 2>&1; then
+  git -C "$main" merge --abort >/dev/null 2>&1 || git -C "$main" reset -q --hard "$before"
+  echo "merge of '$branch' into '$base' failed; base unchanged" >&2
+  exit 20
+fi
+if [ "$(git -C "$main" rev-parse 'HEAD^{tree}')" != "$(git -C "$main" rev-parse "$verified_sha^{tree}")" ]; then
+  git -C "$main" reset -q --hard "$before"
+  echo "landing phase $num would not reproduce the verified tree; base restored" >&2
+  exit 20
+fi
+
+merged=$(git -C "$main" rev-parse --short HEAD)
+printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
+  echo "note: worktree of phase $num kept — it holds untracked files" >&2
+fi
+echo "phase $num merged to $base ($merged)"
