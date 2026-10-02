@@ -32,8 +32,9 @@ controller — and adds:
 2. a **scheduler** that starts every phase whose dependencies are merged, up to a cap of
    concurrent phases (default 3), each in its own **git worktree**;
 3. a **runtime independence check**: a phase the document calls independent is held
-   back when its brief touches files an in-flight phase touches, or when its scout finds
-   it needs something an in-flight phase is building;
+   back when its scout finds it needs something an in-flight phase is building, or when
+   an overlap judge finds it and an in-flight phase both making major changes to the
+   same domain. Shared files alone only send the phase to the judge;
 4. an **integration step** that merges the moved base into a verified phase branch,
    resolves textual conflicts with a resolver agent, re-runs the gates on the integrated
    result, and only then lands the phase on base — so base only ever holds verified
@@ -67,9 +68,9 @@ preflight.
   sentence in its description; nothing else in it changes.
 - **Parallel tasks inside one phase.** The phase lead still runs its workers one at a
   time. Parallelism is between phases only.
-- **Semantic independence analysis.** The runtime check is file-level plus the scout's
-  judgement (§3.4). Coupling through unchanged files is caught by the integration gates,
-  not predicted.
+- **Semantic independence analysis beyond shared files.** The runtime check starts from
+  shared files, judged by the overlap judge, plus the scout's judgement (§3.4). Coupling
+  through unchanged files is caught by the integration gates, not predicted.
 - **Retrying a drained run automatically.** Re-invoking is the retry (§4.8).
 - Everything `building-phased-specs` already excludes: pushing, PRs, trunk merges,
   per-repository configuration, authoring the design document.
@@ -94,7 +95,8 @@ loop until phase-schedule reports nothing running and nothing to do:
       rescout N    → phase-worktree refresh N → ① scout
       integrate N  → phase-integrate N (§3.6)
     when any agent returns, advance its phase:
-      ① scout done   → phase-overlap N  → clear: ② phase lead │ clash: held
+      ① scout done   → phase-overlap N  → clear: ② phase lead │ prereq: held
+                                           │ overlap: judge → run: ② │ hold: held
       ② lead DONE    → ③ verifier
       ③ PASS         → queued for integration
       ③ FAIL         → ladder (§3.7)
@@ -159,17 +161,27 @@ phase against every other in-flight phase:
 
 - **File overlap.** The paths on the new brief's `Files:` lines, against each in-flight
   phase's brief `Files:` paths and its actual `git diff --name-only <fork>..HEAD`.
-  Lockfiles do not count: `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`,
-  `yarn.lock`, `bun.lockb`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`,
-  `Gemfile.lock`, `composer.lock`. They are regenerated at integration, never
-  hand-merged.
+  Files integration settles by regenerating or merging never count: lockfiles,
+  translation catalogues, generated agent-instruction files, markdown docs and rules,
+  generated code, ORM migration metadata, and tests (the list is in the script's
+  header). An owner adds patterns in `.phase-overlap-ignore` at the repository root or
+  `overlap-ignore` in the run directory; `!` re-includes.
 - **In-flight prerequisite.** The scout is given the list of in-flight phases with their
   titles. If grounding finds a prerequisite missing from the repository that one of them
   is building, it returns `prereq-inflight: phase <M>`.
 
-Either signal **holds** the phase: `phase-overlap` appends
-`phase <N>: held — waits on phase <M> (<reason>)`. A clear result appends nothing and
-the controller dispatches the phase lead.
+An in-flight prerequisite **holds** the phase: `phase-overlap` appends
+`phase <N>: held — waits on phase <M> (prereq-inflight)`. A file overlap is a signal,
+not a verdict: merge conflicts are integration's job. `phase-overlap` prints
+`overlap <M>[,<M>…] <paths>`, writes every pair to `phase-<N>-overlap.tsv`, and the
+controller dispatches the **overlap judge** (`overlap-judge-prompt.md`, most capable,
+read-only). It reads both sides' briefs and writes `phase-<N>-overlap-verdict.md`. It
+holds only when both phases make a major change to the same domain — both reshape the
+same data model, state machine, store shape or core function's contract — and runs when
+unsure. `RUN` appends `phase <N>: overlap judged — runs beside phase <M> (<reason>)`,
+which keeps the phase active; `HOLD <M>` appends
+`phase <N>: held — waits on phase <M> (domain: <reason>)`. A clear result appends
+nothing and the controller dispatches the phase lead.
 
 **Release.** When phase M lands, `phase-schedule` emits `rescout N` for every phase held
 on M. A held phase has a brief and no commits, so `phase-worktree refresh` fast-forwards
@@ -347,7 +359,7 @@ phase 2: started — branch phase-2-shell, worktree .worktrees/phase-2-shell
 phase 2: scout dispatched
 phase 2: grounded — brief phase-2-brief.md, 6 tasks, 3 drift, 1 significant
 …
-phase 4: held — waits on phase 3 (overlap src/api.ts)
+phase 4: held — waits on phase 3 (domain: both reshape the session store)
 phase 3: merged to base (4c5d6e7)
 phase 4: released — phase 3 merged
 phase 5: integrating — base moved (phase 4), clean merge 1a2b3c4
@@ -413,7 +425,8 @@ not already running per its `dispatched` lines, then waits for the next return.
 
 `phase-overlap DESIGN_DOC BASE N [PREREQ_PHASE]` implements §3.4. It takes the scout's
 `prereq-inflight` value as its optional argument, so both signals are decided and
-recorded in one place. Prints `clear` or `held <M> <reason>`.
+recorded in one place. Prints `clear`, `held <M> prereq-inflight`, or
+`overlap <M>[,<M>…] <paths>` for the overlap judge.
 
 `phase-integrate DESIGN_DOC BASE N VERIFIED_SHA` implements §3.6 step 1. Appends the
 `integrating` or `conflict` line. Idempotent: re-run after an interruption, it detects a
@@ -449,7 +462,7 @@ graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)   cap 3
 
 phase 2  merged  a1b2c3d..4c5d6e7  review 0/2/5  2 fixed  5 deferred  integration: none needed
 phase 3  merged  …                 review 1/1/2  …                    integration: conflict vs 4, resolved  (repair)
-phase 4  merged  …                 held on 3 (overlap src/api.ts)     integration: clean
+phase 4  merged  …                 held on 3 (domain: both reshape the session store)     integration: clean
 phase 5  FAILED  ladder exhausted — evidence …, worktree .worktrees/phase-5-…
 phase 6  not started (depends on 5)
 
@@ -518,6 +531,7 @@ never does.
 | **D12** | **Cap of 3 concurrent phases by default**, overridable at invocation. | Owner's call. Bounds agent count (`1 + 2 × CAP`), rate limits, disk and install cost. |
 | **D13** | **Scheduling decisions live in a script, `phase-schedule`, that reads only the ledger and graph.** | With several agents in flight, a compacted controller is more likely to lose its place. A pure function of on-disk state cannot. |
 | **D14** | **Lockfiles are excluded from the overlap check and regenerated at integration.** | Almost every phase touches them; counting them would serialise every run. They are generated artifacts, not hand-written code. |
+| **D15** | **File overlap is a signal; an overlap judge decides.** Amends D4. Translation catalogues, generated files, docs and rules, migration metadata and tests are excluded like lockfiles; owners add patterns per repository. | Owner's call, from a live run in a monorepo: nearly every phase shared some file and the file-level check serialised the run. Conflicts are integration's job; what must be avoided is two phases making major changes to the same domain. |
 
 ---
 
@@ -676,9 +690,10 @@ Stated in `SKILL.md`, not only here.
 
 1. **Unattended decisions can be wrong**, and now several phases make them at once
    before any lands.
-2. **The independence check is file-level.** Two phases that never edit the same file
-   but depend on each other's behaviour pass it; the integration gates catch the break
-   only as far as tests cover it.
+2. **The independence check starts from shared files.** Two phases that never edit the
+   same file but depend on each other's behaviour pass it, and the overlap judge can
+   call a shared domain minor when it is not; the integration gates catch the break only
+   as far as tests cover it.
 3. **Cost scales with the cap.** Up to `1 + 2 × CAP` agents run at once; rate limits and
    spend grow with them.
 4. **One install per worktree.** Disk and time cost of setup, per in-flight phase.

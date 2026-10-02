@@ -1,7 +1,7 @@
 # Decision policy
 
 Every agent in a `building-phased-specs-in-parallel` run reads this file, except
-the verifiers and the graph agent.
+the verifiers, the graph agent and the overlap judge.
 The run is unattended. Nobody will answer a question, so you never ask one.
 
 ## Resolve, record, continue

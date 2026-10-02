@@ -14,9 +14,9 @@ same on both hosts. Template envelopes (`Subagent (general-purpose)`, `model`,
   Workers and the reviewer are leaves. Check exposed depth limits; do not infer
   them from a brand.
 - **Concurrent capacity of `1 + 2 × CAP` agents**: the controller, plus up to
-  `CAP` phases each running one controller-level agent (scout, lead, verifier,
-  repair, rescue, resolver or integration verifier) and, under a lead, one
-  worker or reviewer. If the host allows fewer, lower `CAP` before starting and
+  `CAP` phases each running one controller-level agent (scout, overlap judge,
+  lead, verifier, repair, rescue, resolver or integration verifier) and, under
+  a lead, one worker or reviewer. If the host allows fewer, lower `CAP` before starting and
   say so; never exceed the host's limit by queueing blind.
 - **Background dispatch**: the controller dispatches agents without blocking on
   them and is notified, or can wait, as each one finishes. It handles returns
@@ -43,7 +43,7 @@ an inherited working directory.
 
 | Role | Tier |
 |---|---|
-| scout, phase lead, reviewer, repair, rescue, resolver | most capable |
+| scout, overlap judge, phase lead, reviewer, repair, rescue, resolver | most capable |
 | worker: task the brief marks `Tier: standard`, and every fix | most capable |
 | worker: task the brief marks `Tier: mechanical` | mid-tier |
 | verifier, integration verifier, graph agent | mid-tier |

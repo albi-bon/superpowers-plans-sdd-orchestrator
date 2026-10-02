@@ -1,24 +1,48 @@
 #!/usr/bin/env bash
 # Decide whether a freshly scouted phase may build beside the phases already
-# in flight, and record a hold in the ledger when it may not.
+# in flight. File overlap is a signal, not a verdict: merge conflicts between
+# phases are expected, and integration resolves them. What must not happen is
+# two phases in flight making major changes to the same domain; deciding that
+# takes reading both briefs, which is the overlap judge's job, not this
+# script's.
 #
-# Two signals hold phase N:
+# Two signals:
 #   - PREREQ_PHASE: the scout's 'prereq-inflight' value. Grounding found a
 #     prerequisite missing that phase M is building. Holds N until M merges,
-#     unless M is already merged.
+#     unless M is already merged. The only signal that holds outright.
 #   - File overlap: a path on N's brief 'Files:' lines that is also on an
 #     in-flight phase's brief 'Files:' lines or in its branch diff against
-#     base. Lockfiles never count; they are regenerated at integration. A path
-#     ending in '/' matches everything under it.
+#     base. A path ending in '/' matches everything under it. A path matching
+#     an ignore pattern (below) never counts, on either side.
 #
 # In flight means the status phase-state reports as active, verified,
 # integrating or landable. Held, failed and merged phases are not compared
 # against, so holds cannot form a cycle: the later of two clashing phases is
 # always the one held.
 #
-# Prints 'clear', or 'held <M> <reason>' after appending
-#   phase <N>: held — waits on phase <M> (<reason>)
-# to the ledger. A clear result appends nothing.
+# Prints exactly one line:
+#   clear                         nothing overlaps; appends nothing
+#   held <M> prereq-inflight      after appending to the ledger
+#                                   phase <N>: held — waits on phase <M> (prereq-inflight)
+#   overlap <M>[,<M>...] <paths>  files still overlap the listed in-flight
+#                                 phases; <paths> is comma-separated, at most
+#                                 five, then '+<K> more'. Appends nothing: the
+#                                 overlap judge decides. Every pair is written
+#                                 to RUN_DIR/phase-<N>-overlap.tsv as
+#                                 <M><TAB><path>, for the judge.
+# 'clear' and 'held' remove a stale phase-<N>-overlap.tsv.
+#
+# Ignore patterns. Built in (BUILTIN_IGNORE below), for files whose clashes
+# integration settles by regenerating or merging them: lockfiles, translation
+# catalogues, generated agent-instruction files, markdown and other prose
+# docs, generated code, ORM migration metadata, and tests. Two optional files
+# add patterns, read after the built-ins in this order: '.phase-overlap-ignore'
+# at the repository root, then 'overlap-ignore' in the run directory. One
+# pattern per line; '#' starts a comment. A pattern without '/' matches the
+# file name; one with '/' matches the whole path from the repository root, and
+# a leading '**/' also matches at the root; '*' crosses '/'; a trailing '/'
+# matches everything under it. A pattern starting with '!' makes matching
+# paths count again. The last matching pattern wins.
 #
 # Usage: phase-overlap DESIGN_DOC BASE N [PREREQ_PHASE]
 set -euo pipefail
@@ -39,6 +63,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
 brief="$rundir/phase-$num-brief.md"
+pairs="$rundir/phase-$num-overlap.tsv"
 if [ ! -f "$brief" ]; then
   echo "no brief for phase $num at $brief: the scout must write it first" >&2
   exit 2
@@ -50,8 +75,15 @@ status_of() {
 }
 
 hold() {
+  rm -f "$pairs"
   printf 'phase %s: held — waits on phase %s (%s)\n' "$num" "$1" "$2" >> "$ledger"
   printf 'held %s %s\n' "$1" "$2"
+  exit 0
+}
+
+clear_result() {
+  rm -f "$pairs"
+  echo clear
   exit 0
 }
 
@@ -61,6 +93,133 @@ m=$(printf '%s' "$prereq" | tr '[:upper:]' '[:lower:]' | tr -cd '0-9')
 if [ -n "$m" ] && [ "$m" != "$num" ] && [ "$(status_of "$m")" != "merged" ]; then
   hold "$m" "prereq-inflight"
 fi
+
+# --- ignore patterns ---------------------------------------------------------
+
+BUILTIN_IGNORE='
+# lockfiles: regenerated at integration
+package-lock.json
+npm-shrinkwrap.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+Cargo.lock
+go.sum
+poetry.lock
+uv.lock
+Gemfile.lock
+composer.lock
+# translation catalogues: keys merged at integration
+**/i18n/
+**/l10n/
+**/locales/
+**/locale/
+**/translations/
+*.po
+*.pot
+*.xlf
+*.xliff
+*.arb
+*.strings
+*.stringsdict
+*.xcstrings
+# generated agent-instruction files: regenerated at integration
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+# prose: documentation and rules
+*.md
+*.mdx
+*.markdown
+*.rst
+*.adoc
+# generated code: regenerated at integration
+**/__generated__/
+*.generated.*
+# ORM migration metadata: the later phase regenerates its migration on top
+**/migrations/meta/
+**/drizzle/meta/
+**/meta/_journal.json
+**/meta/*_snapshot.json
+migration_lock.toml
+**/db/schema.rb
+**/db/structure.sql
+# tests, guards and snapshots
+**/__tests__/
+**/__snapshots__/
+**/__mocks__/
+**/test/
+**/tests/
+*.test.*
+*.spec.*
+*_test.*
+test_*.py
+*Test.java
+*Test.kt
+*Tests.swift
+*Test.swift
+*.snap
+'
+
+toplevel=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+patterns=()
+while IFS= read -r line; do
+  line=${line%%#*}
+  line=${line#"${line%%[![:space:]]*}"}
+  line=${line%"${line##*[![:space:]]}"}
+  if [ -n "$line" ]; then patterns+=("$line"); fi
+done < <(
+  printf '%s\n' "$BUILTIN_IGNORE"
+  for f in "$toplevel/.phase-overlap-ignore" "$rundir/overlap-ignore"; do
+    if [ -f "$f" ]; then cat "$f"; printf '\n'; fi
+  done
+)
+
+# matches PATH PATTERN — the pattern semantics in the header.
+matches() {
+  local path=$1 pat=$2
+  case "$pat" in
+    */) pat="$pat*" ;;
+  esac
+  case "$pat" in
+    */*)
+      pat=${pat#/}
+      # shellcheck disable=SC2053 # the right-hand side is a glob on purpose
+      [[ $path == $pat ]] && return 0
+      case "$pat" in
+        '**/'*)
+          pat=${pat#\*\*/}
+          # shellcheck disable=SC2053
+          [[ $path == $pat ]] && return 0
+          ;;
+      esac
+      return 1
+      ;;
+    *)
+      # shellcheck disable=SC2053
+      [[ ${path##*/} == $pat ]]
+      ;;
+  esac
+}
+
+# Drop ignored paths from stdin.
+counted() {
+  local path pat ignored
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    ignored=no
+    for pat in "${patterns[@]}"; do
+      case "$pat" in
+        '!'*) matches "$path" "${pat#!}" && ignored=no ;;
+        *) matches "$path" "$pat" && ignored=yes ;;
+      esac
+    done
+    [ "$ignored" = yes ] || printf '%s\n' "$path"
+  done
+}
 
 # --- file overlap ------------------------------------------------------------
 
@@ -90,30 +249,26 @@ brief_paths() {
   ' "$1"
 }
 
-# Drop lockfiles and a leading ./, and de-duplicate.
+# Drop a leading ./ and ignored paths, and de-duplicate.
 normalise() {
   awk '
     {
       p = $0
       sub(/^\.\//, "", p)
       if (p == "") next
-      b = p
-      sub(/^.*\//, "", b)
-      if (b == "package-lock.json" || b == "npm-shrinkwrap.json" || b == "pnpm-lock.yaml" \
-        || b == "yarn.lock" || b == "bun.lockb" || b == "Cargo.lock" || b == "go.sum" \
-        || b == "poetry.lock" || b == "uv.lock" || b == "Gemfile.lock" || b == "composer.lock") next
       if (!(p in seen)) { seen[p] = 1; print p }
     }
-  '
+  ' | counted
 }
 
 mine=$(brief_paths "$brief" | normalise)
-[ -n "$mine" ] || { echo clear; exit 0; }
+[ -n "$mine" ] || clear_result
 
 others=$(printf '%s\n' "$state" | awk -F'\t' -v n="$num" '
   $1 != "run" && $1 != n && ($2 == "active" || $2 == "verified" || $2 == "integrating" || $2 == "landable") { print $1 }
 ')
 
+found=''
 for other in $others; do
   record=$("$here/parse-phases" "$doc" "$other")
   branch="phase-$other-$(printf '%s\n' "$record" | cut -f3)"
@@ -127,22 +282,39 @@ for other in $others; do
     } | normalise
   )
   [ -n "$theirs" ] || continue
-  clash=$(MINE=$mine THEIRS=$theirs awk '
+  clash=$(MINE=$mine THEIRS=$theirs OTHER=$other awk '
     BEGIN {
       a = split(ENVIRON["MINE"], x, "\n")
       b = split(ENVIRON["THEIRS"], y, "\n")
       for (i = 1; i <= a; i++) for (j = 1; j <= b; j++) {
         p = x[i]; q = y[j]
-        if (p == "" || q == "") continue
+        if (p == "" || q == "" || (p in done)) continue
         if (p == q \
           || (substr(p, length(p)) == "/" && index(q, p) == 1) \
-          || (substr(q, length(q)) == "/" && index(p, q) == 1)) { print p; exit }
+          || (substr(q, length(q)) == "/" && index(p, q) == 1)) {
+          done[p] = 1
+          printf "%s\t%s\n", ENVIRON["OTHER"], p
+        }
       }
     }
   ')
   if [ -n "$clash" ]; then
-    hold "$other" "overlap $clash"
+    found="$found$clash
+"
   fi
 done
 
-echo clear
+[ -n "$found" ] || clear_result
+
+printf '%s' "$found" > "$pairs"
+printf '%s' "$found" | awk -F'\t' '
+  !($1 in ph) { ph[$1] = 1; phases = phases (phases == "" ? "" : ",") $1 }
+  !($2 in pa) {
+    pa[$2] = 1; n++
+    if (n <= 5) paths = paths (paths == "" ? "" : ",") $2
+  }
+  END {
+    if (n > 5) paths = paths ",+" (n - 5) " more"
+    printf "overlap %s %s\n", phases, paths
+  }
+'

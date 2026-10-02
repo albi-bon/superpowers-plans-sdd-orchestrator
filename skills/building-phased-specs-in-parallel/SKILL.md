@@ -131,6 +131,7 @@ explicitly** on every dispatch.
 | Dispatch | Template | Model |
 |---|---|---|
 | scout | `scout-prompt.md` | most capable |
+| overlap judge | `overlap-judge-prompt.md` | most capable |
 | phase lead | `lead-prompt.md` — it dispatches `worker-prompt.md` and `reviewer-prompt.md` itself | most capable |
 | verifier | `verifier-prompt.md` | mid-tier |
 | repair | `repair-prompt.md` | most capable |
@@ -155,6 +156,8 @@ Per-phase values, all absolute:
 | Decisions | `RUN_DIR/phase-<N>-decisions.md` |
 | Review findings | `RUN_DIR/phase-<N>-review.md` (written by the lead's reviewer) |
 | Verifier evidence | `RUN_DIR/phase-<N>-evidence.md` |
+| Overlap pairs | `RUN_DIR/phase-<N>-overlap.tsv` (written by `phase-overlap`) |
+| Overlap verdict | `RUN_DIR/phase-<N>-overlap-verdict.md` (written by the overlap judge) |
 | Conflicts | `RUN_DIR/phase-<N>-conflicts.md` (written by `phase-integrate`) |
 | Integration evidence | `RUN_DIR/phase-<N>-integration-evidence.md` |
 | Rescue report | `RUN_DIR/phase-<N>-rescue-report.md` |
@@ -163,7 +166,9 @@ Per-phase values, all absolute:
 
 For the scout: `MERGED_PHASES` is every phase whose ledger says `merged to
 base`; `IN_FLIGHT_PHASES` is every other started phase that is neither held nor
-failed, as `N — title`, or `none`. For the resolver: `MERGED_PHASE_BRIEFS` is
+failed, as `N — title`, or `none`. For the overlap judge: `OVERLAP_PATH` is
+the overlap pairs file; `IN_FLIGHT_BRIEFS` lists, for each phase number on the
+`overlap` line, its number, branch, brief path and decisions path. For the resolver: `MERGED_PHASE_BRIEFS` is
 the brief and decisions path of each phase the conflicts file lists. For repair
 and rescue during integration: `INTEGRATION_CONTEXT` is the conflicts file and
 those same paths; otherwise `none`. For rescue: `EVIDENCE_PATHS` is every
@@ -177,7 +182,9 @@ Handle each return, append its ledger line, then run `phase-schedule` again.
 
 | Return | Append | Then |
 |---|---|---|
-| scout, 5 lines | `phase <N>: grounded — brief phase-<N>-brief.md, <T> tasks, <D> drift, <S> significant` | `phase-overlap "$DESIGN_DOC" "$BASE" N "<prereq-inflight value>"`. `clear` → dispatch the phase lead. `held …` → nothing; it has recorded the hold |
+| scout, 5 lines | `phase <N>: grounded — brief phase-<N>-brief.md, <T> tasks, <D> drift, <S> significant` | `phase-overlap "$DESIGN_DOC" "$BASE" N "<prereq-inflight value>"`. `clear` → dispatch the phase lead. `held …` → nothing; it has recorded the hold. `overlap <M>[,<M>…] <paths>` → dispatch the overlap judge |
+| overlap judge `RUN` | `phase <N>: overlap judged — runs beside phase <M>[,<M>…] (<reason>)` | dispatch the phase lead |
+| overlap judge `HOLD <M>` | `phase <N>: held — waits on phase <M> (domain: <reason>)` | — (the scheduler rescouts it when M merges) |
 | lead `DONE` | `phase <N>: executed — <range>, review <c>/<i>/<m> (<fixed> fixed, <deferred> deferred), <S> significant` | dispatch the verifier |
 | verifier `PASS` | `phase <N>: verified PASS <sha>` | — (the scheduler queues it for integration) |
 | verifier `FAIL` | `phase <N>: verified FAIL — <reason>` | the ladder |
@@ -190,6 +197,26 @@ Handle each return, append its ledger line, then run `phase-schedule` again.
 
 To **fail a phase**: append `phase <N>: failed — <reason>`, then
 `run: draining — phase <N> <reason>`.
+
+### The independence check
+
+Two phases in flight may share files; their merge conflicts are integration's
+job. What must not happen is two phases in flight making **major changes to the
+same domain** — both reshaping the same data model, state machine, store shape
+or core function's contract — because each then builds a design the other
+contradicts. So a file overlap is a signal, not a verdict:
+
+- `phase-overlap` holds outright only on the scout's in-flight prerequisite.
+- It never counts files integration settles by regenerating or merging them:
+  lockfiles, translation catalogues, generated agent-instruction files,
+  markdown docs and rules, generated code, ORM migration metadata, and tests.
+  An owner adds patterns for a repository — a schema catalogue every phase
+  edits, say — in `.phase-overlap-ignore` at the repository root, or for one
+  run in `RUN_DIR/overlap-ignore`. The script's header gives the syntax.
+- Any other shared file prints `overlap …`, and the **overlap judge** reads
+  both sides' briefs and decides: hold only for major changes to the same
+  domain; when unsure, run. You pass it paths; you never read the briefs or
+  its verdict file yourself.
 
 ## Integration
 
@@ -205,6 +232,12 @@ worktree, records the outcome, and prints one of:
 - `merged <sha>` — base merged in cleanly. Dispatch the **integration verifier**:
   a clean textual merge can still be semantically broken.
 - `conflict` — the merge is left in progress. Dispatch the **resolver**.
+
+Conflicts are expected, since the independence check lets phases share files.
+The resolver never hand-merges what a tool produces: lockfiles, generated files
+and ORM migration metadata are regenerated from the merged sources with the
+repository's own commands, and the later phase rebuilds its migration on top of
+base's latest. Translation catalogues keep both sides' keys.
 
 `phase-land` merges the phase into base `--no-ff` in the main checkout,
 refuses unless the merge reproduces the verified tree exactly, appends
@@ -265,7 +298,8 @@ phase 2: integrating — base unchanged, ready 9f8e7d6
 phase 2: merged to base (4c5d6e7)
 phase 3: started — branch phase-3-api, worktree .worktrees/phase-3-api
 phase 4: started — branch phase-4-ui, worktree .worktrees/phase-4-ui
-phase 4: held — waits on phase 3 (overlap src/api.ts)
+phase 4: overlap judge dispatched
+phase 4: held — waits on phase 3 (domain: both reshape the session store)
 …
 phase 3: merged to base (8f9a0b1)
 phase 4: released — phase 3 merged
@@ -293,6 +327,8 @@ checkout or phase worktree. A resume may change `CAP`. Then:
   the resolver continues a merge in progress.
 - `phase-worktree start` re-attaches a started phase whose worktree directory is
   missing. Never create a phase branch or worktree by hand.
+- A phase whose last line is `grounded`, with no dispatch after it: run
+  `phase-overlap` again; it records nothing unless it holds.
 - An integration with no outcome: run `phase-integrate` again; it is
   idempotent.
 - Ladder attempts already started stay used.
@@ -332,7 +368,7 @@ graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)   cap 3
 
 phase 2  merged  a1b2c3d..4c5d6e7  review 0/2/5  2 fixed  5 deferred  integration: ready
 phase 3  merged  …  review 1/1/2  integration: conflict vs 4, resolved  (repair)
-phase 4  merged  …  held on 3 (overlap src/api.ts)  integration: clean merge
+phase 4  merged  …  held on 3 (domain: both reshape the session store)  integration: clean merge
 phase 5  FAILED  ladder exhausted — evidence <path>, worktree .worktrees/phase-5-…
 phase 6  not started (depends on 5)
 
@@ -353,9 +389,10 @@ State these to your human partner when they matter.
 
 1. **Unattended decisions can be wrong**, and several phases make them at once
    before any of them lands. The report lists every significant one.
-2. **The independence check is file-level.** Two phases that never edit the
-   same file but depend on each other's behaviour pass it; the integration
-   gates catch the break only as far as tests cover it.
+2. **The independence check starts from shared files.** Two phases that never
+   edit the same file but depend on each other's behaviour pass it, and the
+   overlap judge can call a shared domain minor when it is not. The
+   integration gates catch the break only as far as tests cover it.
 3. **Cost scales with the cap.** Up to `1 + 2 × CAP` agents run at once; rate
    limits and spend grow with them.
 4. **One install per worktree**: the setup's disk and time, per phase.
@@ -373,6 +410,8 @@ State these to your human partner when they matter.
 | Excuse | Reality |
 |--------|---------|
 | "These two phases are obviously independent, skip the overlap check" | The check costs one script call. The document's graph is the author's intent; the brief's files are what will be touched. |
+| "They share a file, hold the later one to be safe" | Shared files are integration's job. Only the judge's `HOLD` or an in-flight prerequisite holds a phase; a needless hold serialises the run. |
+| "I'll skim both briefs and judge the overlap myself" | You never read a brief. Dispatch the overlap judge; its verdict file holds the reasoning. |
 | "The conflict is two lines, I'll resolve it myself" | You never read code. The resolver reads both phases' briefs and decisions; you would be guessing at one side's intent, and your context pays for it every remaining phase. |
 | "The merge was clean, skip the integration verifier" | A clean textual merge can still break: a renamed function, a changed schema. Base must only ever hold verified trees. |
 | "Phase 4 failed but phase 6 doesn't depend on it — start it" | Draining means nothing new starts. The graph can be wrong; nothing builds beside an unresolved failure. |
