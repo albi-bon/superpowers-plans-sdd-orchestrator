@@ -15,11 +15,11 @@
 # own path rather than what it points at — and the already-installed check would
 # then never match.
 #
-# Usage: ./install.sh [claude|codex|all] [orchestrating|building|executing|all]
+# Usage: ./install.sh [claude|codex|all] [orchestrating|building|executing|parallel|all]
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [claude|codex|all] [orchestrating|building|executing|all]" >&2
+  echo "usage: $0 [claude|codex|all] [orchestrating|building|executing|parallel|all]" >&2
   exit 2
 }
 
@@ -35,8 +35,9 @@ esac
 case "$which" in
   orchestrating) skills="orchestrating-phased-specs" ;;
   building) skills="building-phased-specs" ;;
+  parallel) skills="building-phased-specs-in-parallel" ;;
   executing) skills="executing-phased-specs" ;;
-  all) skills="orchestrating-phased-specs building-phased-specs executing-phased-specs" ;;
+  all) skills="orchestrating-phased-specs building-phased-specs executing-phased-specs building-phased-specs-in-parallel" ;;
   *) usage ;;
 esac
 

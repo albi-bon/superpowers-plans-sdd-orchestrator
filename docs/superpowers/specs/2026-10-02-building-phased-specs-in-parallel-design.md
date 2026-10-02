@@ -53,8 +53,8 @@ preflight.
 
 - The `building-phased-specs-in-parallel` skill: `SKILL.md`, dispatch templates, policy
   files, platform guide, wrapper scripts.
-- New shared scripts: `parse-deps`, `phase-schedule`, `phase-overlap`, `phase-worktree`,
-  `phase-integrate`, `phase-land` (§4).
+- New shared scripts: `parse-deps`, `phase-state`, `phase-schedule`, `phase-overlap`,
+  `phase-worktree`, `phase-integrate`, `phase-land` (§4).
 - A run-directory namespace, `phase-parallel`, so this skill never shares a ledger with
   the other three.
 - `install.sh` learns the `parallel` skill argument.
@@ -341,7 +341,7 @@ Same identity header and append-only rule. New and changed lines:
 # Phase run — spec: /repo/docs/specs/…-design.md
 # base: feat/thing  requested: 2-6
 
-run: started — cap 3
+run: invoked — cap 3
 graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)
 phase 2: started — branch phase-2-shell, worktree .worktrees/phase-2-shell
 phase 2: scout dispatched
@@ -363,8 +363,10 @@ several agents in flight, these lines are how a compacted controller knows what 
 still waiting for, and how a resumed run knows what to re-dispatch.
 
 The identity header is the shared one, unchanged. Each invocation appends
-`run: started — cap <CAP>` (or `run: resumed — cap <CAP>`); a resume may change the cap,
-and the latest line applies.
+`run: invoked — cap <CAP>`; a resume may change the cap, and the latest line applies.
+A failed phase is recorded as `phase <N>: failed — <reason>` before the run's
+`run: draining` line; a drain lifted on resume is recorded as
+`run: undrained — phase <N> verified PASS`.
 
 ### 4.5 `phase-worktree`
 
@@ -396,11 +398,17 @@ Failed and drained phases keep their worktrees for inspection.
 
 ### 4.7 `phase-schedule`, `phase-overlap`, `phase-integrate`
 
-`phase-schedule DESIGN_DOC BASE RANGE CAP` reads `graph.tsv` and the ledger and prints
-one action per line: `start <N>`, `rescout <N>`, `integrate <N> <sha>`, then `wait` if
-anything is in flight, or `done` if nothing is. It never mutates anything. It emits at
-most one `integrate`, and none while an integration is open (an `integrating` or
-`conflict` line without a later outcome). The controller dispatches every action that is
+`phase-state DESIGN_DOC` reads the ledger and prints each started phase's status —
+`active`, `held`, `verified`, `integrating`, `landable`, `merged` or `failed` — and
+whether the run is draining. `phase-schedule` and `phase-overlap` both read the ledger
+through it, so they cannot disagree.
+
+`phase-schedule DESIGN_DOC BASE RANGE CAP` reads `graph.tsv` and `phase-state` and
+prints one action per line: `land <N> <sha>`, `integrate <N> <sha>`, `rescout <N>`,
+`start <N>`, then `wait` if anything is in flight, or `done` if nothing is. It never
+mutates anything. It emits at most one `land` or `integrate`, and no `integrate` while
+an integration is open (an `integrating` line with no later `merged` or `failed`
+line). The controller dispatches every action that is
 not already running per its `dispatched` lines, then waits for the next return.
 
 `phase-overlap DESIGN_DOC BASE N [PREREQ_PHASE]` implements §3.4. It takes the scout's
@@ -428,7 +436,7 @@ another spec or base, as today, and additionally runs `phase-worktree check`.
 - An integration with no outcome line: `phase-integrate` again; it is idempotent.
 - Ladder attempts already started stay consumed.
 - `run: draining` recorded: the failed phase is verified again first, in case the owner
-  fixed it by hand. `PASS` appends `run: resumed — phase <N> verified PASS` and normal
+  fixed it by hand. `PASS` appends `run: undrained — phase <N> verified PASS` and normal
   scheduling resumes; `FAIL` drains again without a new attempt.
 - A dirty main checkout or a dirty phase worktree fails preflight and is named. Never
   stash, discard or commit an interrupted agent's changes.

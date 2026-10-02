@@ -13,6 +13,7 @@ INSTALL="$ROOT/install.sh"
 ORCH="$ROOT/skills/orchestrating-phased-specs"
 BUILD="$ROOT/skills/building-phased-specs"
 EXEC="$ROOT/skills/executing-phased-specs"
+PAR="$ROOT/skills/building-phased-specs-in-parallel"
 
 tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
@@ -28,6 +29,7 @@ run_install() {
 dest="$tmp/skills/orchestrating-phased-specs"
 bdest="$tmp/skills/building-phased-specs"
 edest="$tmp/skills/executing-phased-specs"
+pdest="$tmp/skills/building-phased-specs-in-parallel"
 
 run_install "$tmp/skills"
 assert_rc 0 'fresh install: exits 0'
@@ -38,6 +40,8 @@ assert_eq "$BUILD" "$(cd "$bdest" && pwd -P)" 'the default installs building-pha
 assert_eq 'yes' "$([ -f "$bdest/SKILL.md" ] && echo yes || echo no)" 'its SKILL.md is reachable'
 assert_eq "$EXEC" "$(cd "$edest" && pwd -P)" 'the default installs executing-phased-specs too'
 assert_eq 'yes' "$([ -f "$edest/SKILL.md" ] && echo yes || echo no)" 'its SKILL.md is reachable'
+assert_eq "$PAR" "$(cd "$pdest" && pwd -P)" 'the default installs building-phased-specs-in-parallel too'
+assert_eq 'yes' "$([ -f "$pdest/SKILL.md" ] && echo yes || echo no)" 'its SKILL.md is reachable'
 
 # The wrappers reach the shared scripts through the installed symlink.
 spec_repo=$(cd "$(mktemp -d)" && pwd -P)
@@ -52,6 +56,9 @@ assert_eq "$spec_repo/.superpowers/phase-orchestrator/spec" \
 assert_eq "$spec_repo/.superpowers/phase-executor/spec" \
   "$(cd "$spec_repo" && "$edest/scripts/phase-run-dir" "$spec_repo/spec.md")" \
   'executing wrapper, through the install link, uses the phase-executor namespace'
+assert_eq "$spec_repo/.superpowers/phase-parallel/spec" \
+  "$(cd "$spec_repo" && "$pdest/scripts/phase-run-dir" "$spec_repo/spec.md")" \
+  'parallel wrapper, through the install link, uses the phase-parallel namespace'
 assert_eq "$(printf '1\tOne\tone')" \
   "$(cd "$spec_repo" && "$bdest/scripts/parse-phases" "$spec_repo/spec.md" all)" \
   'parse-phases wrapper passes arguments through'
@@ -139,5 +146,14 @@ set -e
 assert_rc 0 'executing-only install: succeeds'
 assert_eq "$EXEC" "$(cd "$sel2/executing-phased-specs" && pwd -P)" 'executing-only install links the named skill'
 assert_eq 'no' "$([ -e "$sel2/orchestrating-phased-specs" ] && echo yes || echo no)" 'executing-only install leaves the others alone'
+
+sel3="$tmp/parallel only"
+set +e
+OUT=$(CLAUDE_SKILLS_DIR="$sel3" "$INSTALL" claude parallel 2>&1)
+RC=$?
+set -e
+assert_rc 0 'parallel-only install: succeeds'
+assert_eq "$PAR" "$(cd "$sel3/building-phased-specs-in-parallel" && pwd -P)" 'parallel-only install links the named skill'
+assert_eq 'no' "$([ -e "$sel3/building-phased-specs" ] && echo yes || echo no)" 'parallel-only install leaves the others alone'
 
 finish

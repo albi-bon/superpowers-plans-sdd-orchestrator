@@ -1,6 +1,6 @@
 ---
 name: building-phased-specs
-description: Use when the user asks to run, build, implement or work on phases of a phased design document or spec directly from the document — e.g. "work on phases 2 to 6 of <spec> on branch feat/x". For plan-driven execution that writes a Superpowers implementation plan per phase, use orchestrating-phased-specs instead.
+description: Use when the user asks to run, build, implement or work on phases of a phased design document or spec directly from the document — e.g. "work on phases 2 to 6 of <spec> on branch feat/x". For plan-driven execution that writes a Superpowers implementation plan per phase, use orchestrating-phased-specs instead. For building independent phases in parallel worktrees, use building-phased-specs-in-parallel.
 ---
 
 # Building Phased Specs
