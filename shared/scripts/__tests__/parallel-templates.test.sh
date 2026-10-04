@@ -20,7 +20,7 @@ exists() {
 # Templates an agent works in a phase worktree from.
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
 verifier-prompt.md repair-prompt.md rescue-prompt.md resolver-prompt.md
-integration-verifier-prompt.md'
+integration-verifier-prompt.md overlap-judge-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
@@ -132,11 +132,34 @@ has resolver-prompt.md 'CONFLICTS_PATH' 'receives the conflicts file'
 has resolver-prompt.md 'MERGED_PHASE_BRIEFS' 'receives the merged phases briefs'
 has resolver-prompt.md 'both sides' 'keeps both sides behaviour'
 has resolver-prompt.md 'Lockfiles are never hand-merged' 'regenerates lockfiles'
+has resolver-prompt.md 'Conflicts are expected here' 'expects conflicts between phases that share files'
+has resolver-prompt.md 'resolve the sources first, then rerun the generator' 'regenerates generated files'
+has resolver-prompt.md "take the
+         base branch's metadata and migrations as they are" 'keeps the base migration metadata'
+has resolver-prompt.md 'regenerate it with the repository'"'"'s migration generator' 'rebuilds its own migration on top'
+has resolver-prompt.md 'keep every key from both sides' 'merges translation catalogues key by key'
+has rescue-prompt.md 'ORM migration metadata' 'regenerates migration metadata when it redoes the merge'
 has resolver-prompt.md 'git merge --abort' 'aborts an unresolvable merge'
 has resolver-prompt.md 'RESOLVED <short merge commit SHA>' 'returns RESOLVED with the SHA'
 has resolver-prompt.md 'UNRESOLVED' 'can return UNRESOLVED'
 has resolver-prompt.md 'the most capable model available' 'resolver is most capable'
 has resolver-prompt.md 'four lines' 'return contract is capped'
+
+# --- overlap-judge-prompt.md -------------------------------------------------
+
+exists overlap-judge-prompt.md
+has overlap-judge-prompt.md 'OVERLAP_PATH' 'receives the overlap pairs file'
+has overlap-judge-prompt.md 'IN_FLIGHT_BRIEFS' 'receives the in-flight phases briefs'
+has overlap-judge-prompt.md 'VERDICT_PATH' 'writes one verdict file'
+has overlap-judge-prompt.md 'Hold only when both phases make a **major change to the same domain**' 'states the owner rule'
+has overlap-judge-prompt.md 'When you are unsure, run' 'doubt runs, not holds'
+has overlap-judge-prompt.md 'hold on the lowest' 'names one phase to hold on'
+has overlap-judge-prompt.md 'Read only. You write VERDICT_PATH and nothing else' 'is read-only'
+has overlap-judge-prompt.md 'RUN — <one-line reason>, or HOLD <M>' 'returns RUN or HOLD M'
+has overlap-judge-prompt.md 'the most capable model available' 'the judge is most capable'
+has overlap-judge-prompt.md 'three lines' 'return contract is capped'
+assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/overlap-judge-prompt.md" || true)" \
+  'overlap-judge-prompt.md: decides a verdict, not implementation, so takes no decision policy'
 
 # --- integration-verifier-prompt.md -----------------------------------------
 

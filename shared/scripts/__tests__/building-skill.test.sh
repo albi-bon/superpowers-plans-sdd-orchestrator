@@ -64,7 +64,7 @@ has 'grep -H' 'the report collects significant decision lines from the run direc
 
 has 'name the model explicitly' 'requires an explicit model on every dispatch'
 has 'mid-tier' 'the verifier takes a mid-tier model'
-has 'Every worker uses the most capable model' 'workers always use the most capable model'
+has 'fix workers and the reviewer always use the most' 'only a mechanical task worker takes the mid-tier'
 assert_eq '' "$(grep -in 'haiku\|sonnet' "$ROOT/SKILL.md" || true)" \
   'SKILL.md names no smaller model for any role'
 

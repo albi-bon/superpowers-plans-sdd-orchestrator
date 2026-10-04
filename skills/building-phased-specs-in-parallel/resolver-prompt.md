@@ -48,9 +48,25 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        record the choice. Never settle a source file by taking one side
        wholesale (`--ours`, `--theirs`, `-X`) unless the other side's change is
        fully contained in it, and record that you did.
-    4. Lockfiles are never hand-merged: take the base branch's version, then
-       regenerate it with the repository's own package manager so it reflects
-       both sides' manifests.
+    4. Conflicts are expected here: phases may share files, and only a clash
+       of designs held one back. Files a tool produces are never hand-merged;
+       regenerate them from the merged sources with the repository's own
+       command, and record which command:
+       - Lockfiles are never hand-merged: take the base branch's version, then
+         regenerate it with the repository's own package manager so it
+         reflects both sides' manifests.
+       - Generated files (agent-instruction files built from rules, codegen
+         output, anything the repository's instructions say is generated):
+         resolve the sources first, then rerun the generator and take its
+         output.
+       - ORM migration metadata (snapshots, journals, lock files): take the
+         base branch's metadata and migrations as they are. If this phase
+         added a migration, remove it and its metadata entries, then
+         regenerate it with the repository's migration generator against the
+         merged schema, so it follows the base branch's latest migration.
+       - Translation catalogues: keep every key from both sides. Where both
+         sides added the same key with different text, choose one and record
+         it.
     5. A non-conflicted file may need a small change for the merged result to
        build — a call site the other phase renamed, an import the other phase
        moved. Make it; it is part of the resolution. Nothing beyond that.

@@ -34,7 +34,7 @@ for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scri
          scripts/phase-integrate scripts/phase-land \
          scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md verifier-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
-         graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
+         overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
   case "$f" in
     scripts/*) assert_contains "$(basename "$f")" "$BODY" "SKILL.md: references $f" ;;
     *) has "$f" "references $f" ;;
@@ -56,6 +56,15 @@ has 'phase-schedule' 'asks the scheduler what to do'
 has 'after **every** agent return' 'consults the scheduler after every return'
 has 'dispatched' 'records every dispatch in the ledger'
 has 'phase-overlap' 'runs the independence check after the scout'
+has 'a file overlap is a signal, not a verdict' 'a shared file alone never holds a phase'
+has '→ dispatch the overlap judge' 'an overlap result goes to the judge'
+has '| overlap judge `RUN` | `phase <N>: overlap judged — runs beside phase' 'a run verdict keeps the phase active in the ledger'
+has '| overlap judge `HOLD <M>` | `phase <N>: held — waits on phase <M> (domain:' 'a hold verdict appends the held line'
+has 'major changes to the' 'states the owner rule: hold only for major changes to the same domain'
+has '.phase-overlap-ignore' 'documents the repository ignore file'
+has 'RUN_DIR/overlap-ignore' 'documents the run ignore file'
+has 'you never read the briefs or' 'the controller never reads the briefs it passes to the judge'
+has 'ORM migration metadata are regenerated' 'integration regenerates generated files and migration metadata'
 has 'phase-integrate' 'integrates through phase-integrate'
 has 'phase-land' 'lands through phase-land'
 has 'integration verifier' 'clean merges are verified again'

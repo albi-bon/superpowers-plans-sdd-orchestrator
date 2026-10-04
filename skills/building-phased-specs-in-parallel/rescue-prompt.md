@@ -58,7 +58,9 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        `git merge --no-ff BASE -m "integrate: base into phase PHASE_NUMBER"`,
        resolve every conflict so both sides' behaviour holds, regenerate
        lockfiles with the repository's package manager rather than merging
-       them by hand, and conclude the merge. Adapt this phase's code to the
+       them by hand, regenerate generated files and ORM migration metadata
+       with the repository's own commands (this phase's migration rebuilt on
+       top of the base's latest), and conclude the merge. Adapt this phase's code to the
        base where the two cannot otherwise coexist.
     5. Re-run every failing command from the evidence, plus the repository's
        full gates — typecheck, lint, test, build, whatever it has — and confirm
