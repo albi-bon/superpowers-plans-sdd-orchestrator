@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# phase-integrate and phase-land together: two phases built side by side, one
-# landing cleanly, one integrating cleanly, one through a conflict.
+# phase-integrate and phase-land together: three phases built side by side,
+# one integrating on an unmoved base, one through a clean merge, one through a
+# conflict. Each lands only once the ledger shows its integration verified.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR
@@ -69,6 +70,13 @@ run_in "$LAND" "$tmp/spec.md" feat/x 1 "$v1"
 assert_rc 11 'land: dirty main checkout refused'
 rm "$tmp/dirty.txt"
 run_in "$LAND" "$tmp/spec.md" feat/x 1 "$v1"
+assert_rc 22 'land 1: ready alone is not landable, the integration verifier has not passed it'
+assert_eq 'initial' "$(git -C "$tmp" log -1 --format=%s)" 'land 1 refused: base unchanged'
+printf 'phase 1: integration verified PASS deadbee\n' >> "$ledger"
+run_in "$LAND" "$tmp/spec.md" feat/x 1 "$v1"
+assert_rc 22 'land 1: a pass recorded for another commit is refused'
+printf 'phase 1: integration verified FAIL — tests\nphase 1: repair — started (attempt 1/2)\nphase 1: integration verified PASS %s\n' "$v1" >> "$ledger"
+run_in "$LAND" "$tmp/spec.md" feat/x 1 "$v1"
 assert_rc 0 'land 1: exits 0'
 assert_eq 'merge: phase 1 — One' "$(git -C "$tmp" log -1 --format=%s)" 'land 1: --no-ff merge commit named for the phase'
 assert_eq "$(git -C "$tmp" rev-parse "$v1^{tree}")" "$(git -C "$tmp" rev-parse 'HEAD^{tree}')" 'land 1: base tree equals the verified tree'
@@ -118,6 +126,7 @@ printf 'phase three\nbase side\n' > "$wt3/shared.txt"
 git -C "$wt3" add shared.txt
 git -C "$wt3" commit -q --no-edit
 i3=$(git -C "$wt3" rev-parse --short HEAD)
+printf 'phase 3: resolved %s\nphase 3: integration verified PASS %s\n' "$i3" "$i3" >> "$ledger"
 run_in "$LAND" "$tmp/spec.md" feat/x 3 "$i3"
 assert_rc 0 'land 3 after resolution: exits 0'
 assert_eq "$(printf 'phase three\nbase side')" "$(cat "$tmp/shared.txt")" 'land 3: base holds the resolution'

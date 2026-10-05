@@ -5,9 +5,10 @@
 # remembers everything.
 #
 # Prints one action per line, in this order:
-#   land <N> <sha>       an open integration passed; land it (phase-land)
-#   integrate <N> <sha>  no integration is open; integrate the phase that
-#                        reached 'verified PASS' first
+#   land <N> <sha>       an open integration passed its integration
+#                        verifier; land it (phase-land)
+#   integrate <N> <sha>  no integration is open; integrate the queued phase
+#                        that was queued first (phase-state's 'queued')
 #   rescout <N>          a held phase's blocker has merged (phase-worktree
 #                        refresh, then the scout)
 #   start <N>            every dependency is merged or outside the range
@@ -61,7 +62,7 @@ REQUESTED=$requested STATE=$state CAP=$cap awk -F'\t' '
   # Reading st[n] for a missing n would create it, and then "n in st" would
   # call an unstarted phase started. Every lookup goes through status().
   function status(n) { return (n in st) ? st[n] : "" }
-  function busy(s) { return s == "active" || s == "verified" || s == "integrating" || s == "landable" }
+  function busy(s) { return s == "active" || s == "queued" || s == "integrating" || s == "landable" }
   function ready(n,   m, d, j) {
     if (deps[n] == "" || deps[n] == "-") return 1
     m = split(deps[n], d, ",")
@@ -74,7 +75,7 @@ REQUESTED=$requested STATE=$state CAP=$cap awk -F'\t' '
       if (st[n] == "integrating" || st[n] == "landable") open = 1
       if (st[n] == "landable") print "land " n " " arg[n]
       if ((n in want) && busy(st[n])) inflight++
-      if (st[n] == "verified" && (best == "" || nr[n] < nr[best])) best = n
+      if (st[n] == "queued" && (best == "" || nr[n] < nr[best])) best = n
     }
     if (!open && best != "") print "integrate " best " " arg[best]
 
