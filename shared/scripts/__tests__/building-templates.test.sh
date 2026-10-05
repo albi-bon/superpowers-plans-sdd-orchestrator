@@ -166,4 +166,11 @@ has worker-prompt.md '`Full suites:`' 'workers are told to avoid the full suites
 has repair-prompt.md 'the failing tests' 'repair re-runs the failing tests, not whole suites'
 has verifier-prompt.md 'FULL_CHECKS=1' 'the verifier opts in to full suites'
 
+has verifier-prompt.md 'FULL_SUITE_POLICY' 'the verifier receives the full-suite policy'
+has verifier-prompt.md 'this is a re-verification' 'a verification after a repair is a re-verification'
+has verifier-prompt.md 'The scope is
+       narrow' 'a re-verification after a narrow repair is narrow'
+has verifier-prompt.md 'never overwrite an earlier one' 'evidence sections are appended'
+has SKILL.md 'FULL_SUITE_POLICY' 'the controller resolves the full-suite policy'
+
 finish
