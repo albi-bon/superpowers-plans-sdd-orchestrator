@@ -15,7 +15,7 @@ same on both hosts. Template envelopes (`Subagent (general-purpose)`, `model`,
   them from a brand.
 - **Concurrent capacity of `1 + 2 × CAP` agents**: the controller, plus up to
   `CAP` phases each running one controller-level agent (scout, overlap judge,
-  lead, verifier, repair, rescue, resolver or integration verifier) and, under
+  lead, repair, rescue, resolver or integration verifier) and, under
   a lead, one worker or reviewer. If the host allows fewer, lower `CAP` before starting and
   say so; never exceed the host's limit by queueing blind.
 - **Background dispatch**: the controller dispatches agents without blocking on
@@ -32,7 +32,10 @@ same on both hosts. Template envelopes (`Subagent (general-purpose)`, `model`,
 Use the host's bounded wait/result tools and required progress-update cadence.
 A spawn acknowledgement is not completion. Do not launch a duplicate agent
 because an existing one is taking time; reconcile its status and persisted
-output. Release finished agents if the host counts retained agents against its
+output. A host may end a background lead's turn while the worker it dispatched
+is still running, so the lead hands back without a status: wait for that
+worker's own report before dispatching a lead again, so two agents never work
+one task. Release finished agents if the host counts retained agents against its
 limit.
 
 Every agent works in its phase's worktree, never in the main checkout. Give
@@ -46,7 +49,7 @@ an inherited working directory.
 | scout, overlap judge, phase lead, reviewer, repair, rescue, resolver | most capable |
 | worker: task the brief marks `Tier: standard`, and every fix | most capable |
 | worker: task the brief marks `Tier: mechanical` | mid-tier |
-| verifier, integration verifier, graph agent | mid-tier |
+| integration verifier (gates and acceptance check, once per phase), graph agent | mid-tier |
 
 There is no cheap tier in this workflow. The scout assigns each task's tier
 under the criteria in `scout-prompt.md`; the lead applies it and does not

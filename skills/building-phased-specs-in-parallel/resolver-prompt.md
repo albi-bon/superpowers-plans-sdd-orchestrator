@@ -1,6 +1,6 @@
 # Resolver Dispatch Template
 
-Dispatched at integration, only when merging the base branch into a verified
+Dispatched at integration, only when merging the base branch into a built
 phase branch stopped on a textual conflict. Other phases landed on base while
 this one was being built; the resolver makes both sides live together. The merge
 is already in progress in the phase's worktree when it starts. Substitute every
