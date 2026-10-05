@@ -62,10 +62,21 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        controller holds this phase until phase M lands. A renamed or reshaped
        API is adapted to. Append significant resolutions to DECISIONS_PATH as
        the policy describes. A mismatch is never a reason to stop.
-    5. Split the phase into 3 to 10 tasks, ordered so each builds only on
+    5. Find the repository's checks, from its instructions, manifests and
+       scripts; read them, do not run them. `Checks:` is the command that runs
+       only the tests related to given files (for example
+       `vitest related <files> --run`, `jest --findRelatedTests <files>`, or the
+       test files themselves for `pytest`), and the cheapest typecheck for one
+       package — never a production build when a typecheck exists. `Full
+       suites:` is every command that runs a whole suite — the root test
+       command, a whole package's test script, integration and end-to-end
+       suites — and production builds. Workers run only the first; the
+       verifier runs the second. Record both under Global constraints, with
+       the repository's exact command spelling.
+    6. Split the phase into 3 to 10 tasks, ordered so each builds only on
        earlier ones. A task is a coherent slice one agent can implement and
        test in one sitting, touching a small set of files.
-    6. Write the brief to exactly BRIEF_PATH, in the shape below.
+    7. Write the brief to exactly BRIEF_PATH, in the shape below.
 
     If BRIEF_PATH already exists, an earlier scout was interrupted, the run
     was resumed, or the phase was held and has now been released onto a newer
@@ -103,6 +114,8 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     ## Global constraints
     Setup: <the exact install command you ran in step 0>
+    Checks: related tests `<command, with <files> where the paths go>`; typecheck `<command>`
+    Full suites: `<command>`, `<command>` — verifier only
     <copied from the design document with their exact values: decision-log
     items, platform and portability rules, naming and style rules, anything the
     document states as binding on every phase>

@@ -70,9 +70,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     5. A non-conflicted file may need a small change for the merged result to
        build — a call site the other phase renamed, an import the other phase
        moved. Make it; it is part of the resolution. Nothing beyond that.
-    6. Run the fast checks for every file you touched — typecheck and lint
-       where the repository has them — and the tests that cover them. Judge
-       every command by its exit code, never by its printed summary.
+    6. Run the brief's `Checks:` over every file you touched — the related
+       tests and the typecheck — and lint where the repository has it. Do not
+       run a command from the brief's `Full suites:` line; the integration
+       verifier runs next. Judge every command by its exit code, never by its
+       printed summary.
     7. Conclude the merge with `git commit --no-edit` and leave the working
        tree clean.
     8. Append your decisions to DECISIONS_PATH under the decision policy. A

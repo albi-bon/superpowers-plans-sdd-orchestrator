@@ -82,6 +82,7 @@ assert_eq 'merge: phase 1 — One' "$(git -C "$tmp" log -1 --format=%s)" 'land 1
 assert_eq "$(git -C "$tmp" rev-parse "$v1^{tree}")" "$(git -C "$tmp" rev-parse 'HEAD^{tree}')" 'land 1: base tree equals the verified tree'
 assert_eq 'no' "$([ -d "$wt1" ] && echo yes || echo no)" 'land 1: worktree removed'
 assert_contains "phase 1: merged to base (" "$(cat "$ledger")" 'land 1: recorded'
+assert_contains "phase 1: metrics — source +" "$(cat "$ledger")" 'land 1: a metrics line is recorded'
 run_in "$LAND" "$tmp/spec.md" feat/x 1 "$v1"
 assert_rc 17 'land 1 again: refused'
 

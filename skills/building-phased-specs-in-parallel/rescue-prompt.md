@@ -62,9 +62,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        with the repository's own commands (this phase's migration rebuilt on
        top of the base's latest), and conclude the merge. Adapt this phase's code to the
        base where the two cannot otherwise coexist.
-    5. Re-run every failing command from the evidence, plus typecheck, lint
-       and the test suites of the packages you changed, and confirm each
-       exits 0. The integration verifier runs the rest after you. A command
+    5. Re-run what failed — the failing tests themselves, not the whole
+       suite that contained them — plus the brief's `Checks:` over the files
+       you changed, and confirm each exits 0. Do not run a command from the
+       brief's `Full suites:` line; the integration verifier runs the rest
+       after you. A command
        that prints an all-green summary and exits non-zero has NOT passed —
        judge by the exit code, never by the printed totals.
     6. Commit your work on PHASE_BRANCH and leave the working tree clean.

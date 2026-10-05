@@ -152,4 +152,18 @@ for t in scout-prompt.md worker-prompt.md reviewer-prompt.md verifier-prompt.md 
   has "$t" 'Do not spawn subagents' 'is a leaf and spawns nothing'
 done
 
+# --- check discipline ------------------------------------------------------
+has testing-policy.md 'Your ceiling is one test per' 'states a test ceiling the worker works out itself'
+has testing-policy.md 'nobody hands you a list' 'the ceiling is not a list of planned tests'
+has testing-policy.md 'does not count tests' 'the reviewer does not police the ceiling'
+has testing-policy.md 'Never run the repository' 'workers never run full suites'
+has testing-policy.md 'unchanged tree' 'no repeat runs on an unchanged tree'
+has testing-policy.md 'skips the red step' 'mechanical tasks skip the red step'
+has scout-prompt.md 'Checks: related tests' 'the brief records the fast checks'
+has scout-prompt.md 'Full suites: ' 'the brief records the full suites'
+has worker-prompt.md 'brief'"'"'s `Checks:`' 'workers run the brief'"'"'s checks'
+has worker-prompt.md '`Full suites:`' 'workers are told to avoid the full suites'
+has repair-prompt.md 'the failing tests' 'repair re-runs the failing tests, not whole suites'
+has verifier-prompt.md 'FULL_CHECKS=1' 'the verifier opts in to full suites'
+
 finish

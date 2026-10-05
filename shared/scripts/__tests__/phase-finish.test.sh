@@ -68,6 +68,9 @@ assert_eq 'merge: phase 1 — First' "$(git -C "$tmp" log -1 --format=%s)" 'merg
 merged=$(git -C "$tmp" rev-parse --short HEAD)
 assert_contains "phase 1 merged to feat/demo ($merged)" "$OUT" 'prints one summary line'
 assert_eq '1' "$(grep -c "^phase 1: merged to base ($merged)$" "$ledger")" 'appends exactly one ledger line'
+assert_eq "phase 1: merged to base ($merged)" "$(grep '^phase 1: ' "$ledger" | grep -B1 '^phase 1: metrics — ' | head -1)" \
+  'a metrics line follows the merge line'
+assert_contains 'checks: no agent-checks log' "$(grep '^phase 1: metrics — ' "$ledger")" 'metrics line: no log in this repository'
 
 run_in "$FINISH" "$tmp/spec.md" feat/demo 1 "$verified"
 assert_rc 17 'second finish of the same phase: refused'

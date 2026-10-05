@@ -62,7 +62,7 @@ those plans executed inline or name it.
 ## Layout
 
 ```
-shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish,
+shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
                          phase-overlap, phase-worktree, phase-integrate, phase-land
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill

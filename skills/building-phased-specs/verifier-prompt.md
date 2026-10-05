@@ -41,7 +41,12 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        test, build, whatever is really there — from its manifests, scripts and
        configuration. Nothing is hard-coded; different repositories have
        different gates.
-    3. Run them.
+    3. Run them. Prefix every whole-suite and production-build command
+       — everything on the brief's `Full suites:` line — with `FULL_CHECKS=1`,
+       for example `FULL_CHECKS=1 pnpm test`. A repository that stops agents
+       running whole suites on phase branches lets these through; anywhere
+       else the variable is inert. Run slow suites one after another, not
+       side by side.
     4. Report the exit code of every command you run. A suite that prints
        "all passed" and exits non-zero is a FAIL. A suite whose summary line
        looks green and whose exit code is 1 is a FAIL. Judge by the exit code,

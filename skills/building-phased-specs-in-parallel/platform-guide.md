@@ -55,6 +55,30 @@ There is no cheap tier in this workflow. The scout assigns each task's tier
 under the criteria in `scout-prompt.md`; the lead applies it and does not
 downgrade a `standard` task. Fix-wave workers always use the most capable tier.
 
+
+## Check discipline and the command guard
+
+Workers run only the brief's `Checks:` — the tests related to the files they
+changed and a typecheck — and the verifier runs the `Full suites:` once. The
+templates make that likely, not certain: a worker that reaches for the root
+test command anyway costs minutes, and in a parallel run slows every phase on
+the machine.
+
+A repository can enforce it with a Claude Code `PreToolUse` hook on Bash of
+its own. On a `phase-<N>-<slug>` branch it refuses whole-suite and
+production-build commands unless they start with `FULL_CHECKS=1`, which only
+the verifier templates mention; it refuses a test command identical to one
+that already finished on the same tree; and it appends every check it sees to
+`<git common dir>/agent-checks.log`, in the format the header of
+`shared/scripts/phase-metrics` gives. The skill neither installs nor requires
+it. With or without it, each landing appends a `metrics` line to the ledger:
+lines of source and test the phase added, and the log's counts when there is
+one.
+
+Several phases building at once share one machine's cores. Cap the test
+runner's worker count per worktree in the repository's own configuration, or
+suites slow each other past tool timeouts and flake.
+
 ## Claude Code
 
 Installation: `./install.sh` (or `./install.sh claude parallel`) links

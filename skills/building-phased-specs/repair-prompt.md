@@ -37,7 +37,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     3. Diagnose and fix the root cause. A `missing` deliverable is built, with
        tests as the testing policy says. Do not paper over a failure by
        weakening, skipping, or deleting the check that caught it.
-    4. Re-run the failing commands yourself and confirm each one now exits 0.
+    4. Re-run what failed and confirm each one now exits 0: the failing tests
+       themselves (the files or names the evidence points at) and the brief's
+       `Checks:` over the files you changed. Do not re-run a whole suite from
+       the brief's `Full suites:` line; the verifier runs it again.
        A command that prints an all-green summary and exits non-zero has NOT
        passed — judge by the exit code, never by the printed totals.
     5. Commit your fix on PHASE_BRANCH and leave the working tree clean.

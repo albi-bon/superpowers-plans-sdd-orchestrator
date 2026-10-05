@@ -101,6 +101,10 @@ fi
 
 merged=$(git -C "$main" rev-parse --short HEAD)
 printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+# Metrics are a record, not a gate: a failure here never fails the landing.
+if metrics=$(cd "$main" && "$here/phase-metrics" "$merged" "$branch" 2>/dev/null); then
+  printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
+fi
 if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
   echo "note: worktree of phase $num kept — it holds untracked files" >&2
 fi

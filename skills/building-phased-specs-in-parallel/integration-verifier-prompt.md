@@ -94,7 +94,12 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        it only when it cannot, and then record `not run — <why>` in the
        evidence and name it in your reason line. A skipped suite never counts
        as passed.
-    7. Run the gates in scope, in WORKTREE.
+    7. Run the gates in scope, in WORKTREE. Prefix every whole-suite and production-build command
+       — everything on the brief's `Full suites:` line — with `FULL_CHECKS=1`,
+       for example `FULL_CHECKS=1 pnpm test`. A repository that stops agents
+       running whole suites on phase branches lets these through; anywhere
+       else the variable is inert. Run slow suites one after another, not
+       side by side.
     8. Report the exit code of every command you run. A suite that prints
        "all passed" and exits non-zero is a FAIL. A suite whose summary line
        looks green and whose exit code is 1 is a FAIL. Judge by the exit code,

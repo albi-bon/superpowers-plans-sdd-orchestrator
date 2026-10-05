@@ -265,7 +265,9 @@ base's latest. Translation catalogues keep both sides' keys.
 `phase-land` merges the phase into base `--no-ff` in the main checkout,
 refuses unless the ledger shows that commit's `integration verified PASS` and
 the merge reproduces the verified tree exactly, appends
-`phase <N>: merged to base (<sha>)`, removes the worktree and keeps the branch.
+`phase <N>: merged to base (<sha>)` and a `phase <N>: metrics — …` line
+(platform-guide.md § Check discipline), removes the worktree and keeps the
+branch.
 
 A non-zero exit from `phase-worktree`, `phase-integrate` or `phase-land` fails
 the phase. Each has already left base unchanged.

@@ -131,7 +131,8 @@ Order within a phase:
 ```
 
 It refuses a dirty tree or a phase HEAD other than the verified SHA, merges
-`--no-ff`, appends `phase <N>: merged to base (<sha>)` to the ledger, and prints
+`--no-ff`, appends `phase <N>: merged to base (<sha>)` to the ledger, then a
+`phase <N>: metrics — …` line (platform-guide.md § Check discipline), and prints
 one line. On a non-zero exit, halt: it has already aborted the merge and left
 base unchanged. If it refuses because HEAD moved, verify again rather than
 merging. Keep phase branches after merging — free rollback points.

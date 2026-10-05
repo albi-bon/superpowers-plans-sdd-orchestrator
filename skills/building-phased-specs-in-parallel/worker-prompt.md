@@ -62,9 +62,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     3. Implement the assignment completely. No placeholders, no TODOs standing
        in for behaviour the task asks for.
     4. Write tests as the testing policy says.
-    5. Run the tests you wrote or touched, plus the repository's fast checks for
-       the files you changed — typecheck and lint where the repository has
-       them. Judge every command by its exit code, never by its printed
+    5. Run the brief's `Checks:` commands over the files you changed — the
+       related tests and the typecheck — as the testing policy's Running
+       checks section says: once per finished edit, never twice on an
+       unchanged tree, and never a command on the brief's `Full suites:`
+       line. Judge every command by its exit code, never by its printed
        summary. A red check is yours to fix before you return.
     6. Commit on PHASE_BRANCH — one or more commits, with messages in the
        repository's style. Leave the working tree clean.
