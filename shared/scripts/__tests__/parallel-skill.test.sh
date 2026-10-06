@@ -32,7 +32,7 @@ assert_contains 'use building-phased-specs-in-parallel' "$(sed -n '3p' "$BUILD/S
 for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scripts/parse-deps \
          scripts/phase-state scripts/phase-schedule scripts/phase-overlap scripts/phase-worktree \
          scripts/phase-integrate scripts/phase-land \
-         scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md verifier-prompt.md \
+         scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
          overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
   case "$f" in
@@ -41,6 +41,8 @@ for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scri
   esac
   assert_eq 'yes' "$([ -e "$ROOT/$f" ] && echo yes || echo no)" "SKILL.md: the referenced path $f exists on disk"
 done
+assert_eq 'no' "$([ -e "$ROOT/verifier-prompt.md" ] && echo yes || echo no)" \
+  'no separate phase verifier template: the integration verifier is the one verification'
 for f in phase-start phase-finish; do
   assert_eq 'no' "$([ -e "$ROOT/scripts/$f" ] && echo yes || echo no)" \
     "no $f wrapper: it would switch the main checkout off base"
@@ -67,7 +69,18 @@ has 'you never read the briefs or' 'the controller never reads the briefs it pas
 has 'ORM migration metadata are regenerated' 'integration regenerates generated files and migration metadata'
 has 'phase-integrate' 'integrates through phase-integrate'
 has 'phase-land' 'lands through phase-land'
-has 'integration verifier' 'clean merges are verified again'
+has 'integration verifier' 'integrated phases are verified'
+has 'verified once, on the integrated tree' 'each phase is verified once, after integration'
+has 'Dispatch the
+  **integration verifier** all the same' 'a ready integration is verified too'
+has 'unverified trees on a base that may be pushed' 'states why landings are not batched under one check'
+has 'FULL_SUITE_POLICY' 'the full-suite policy is configurable'
+has '`full suite: once per phase`' 'the owner sets the full-suite policy in the request'
+has 'SHA is the last word' 'PASS lines end in their SHA'
+has 'RESUME_NOTES' 'a lead handed back mid-phase resumes with its worker report'
+has 'wait for that worker' 'never two agents on one task'
+has 'Runs started under the earlier flow' 'finishes ledgers begun under the two-verifier flow'
+has 'both spent on the integrated tree' 'ladder attempts are spent on the combined check'
 has '**two attempts**' 'two ladder attempts'
 has 'never a third attempt' 'no third attempt'
 has 'straight to rescue' 'an unresolved merge goes to rescue'

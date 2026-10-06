@@ -7,24 +7,45 @@
 # ascending by number:
 #
 #   run<TAB>draining|normal
-#   <N><TAB><status><TAB><arg><TAB><ledger line number>
+#   <N><TAB><status><TAB><arg><TAB><ledger line number><TAB><attempts used>
 #
 # Statuses, decided from the phase's ledger lines ('<role> dispatched' lines
 # are progress markers and never change a status):
 #   merged       a 'merged to base (<sha>)' line exists; arg is the sha
 #   failed       its last line is 'failed — …'
 #   landable     integration is open and the last line is
-#                'integration verified PASS <sha>' or an 'integrating — …
-#                ready <sha>' line; arg is the sha
+#                'integration verified PASS <sha>'; arg is the sha. An
+#                'integrating — … ready <sha>' line is landable only when the
+#                phase was queued by an old-style 'verified PASS' line (see
+#                below); otherwise it waits for the integration verifier
 #   integrating  integration is open (an 'integrating' line after the last
 #                'failed' line), anything else
 #   held         last line 'held — waits on phase <M> …'; arg is M
-#   verified     last line 'verified PASS <sha>'; arg is the sha; the line
-#                number orders the integration queue
+#   queued       last line 'executed — …' (the lead returned DONE, or a
+#                phase was requeued), or an old-style 'verified PASS <sha>'
+#                line; arg is the sha to integrate; the line number orders
+#                the integration queue
 #   active       anything else: started and working
 #
-# The run is draining when its last 'run: draining' line has no later
-# 'run: undrained' line.
+# The sha of an 'executed' line is the end of its 'A..B' commit range, or
+# its last word when it has no range. The sha of a PASS line is the word
+# right after 'PASS'; write it as the line's last word all the same.
+#
+# Two ledger flows are read the same way. In the current flow a phase is
+# verified once, on the integrated tree: executed → integrating → integration
+# verified PASS → land. In the earlier flow a phase verifier ran first, and a
+# 'verified PASS <sha>' line queued the phase; its 'ready' integration then
+# landed the tree that verifier passed. Ledgers from either flow, or a mix of
+# both across phases, keep their meaning:
+#   - 'verified PASS <sha>' still queues the phase.
+#   - 'ready <sha>' is landable only when the line that queued this
+#     integration was 'verified PASS'; after an 'executed' line it is not.
+#   - an 'executed' line followed by a bare 'verifier dispatched' (the
+#     earlier flow's phase verifier) is active, not queued, until that
+#     verifier's outcome line.
+#
+# Attempts used is the count of 'repair — started' and 'rescue — started'
+# lines: the escalation ladder allows two.
 #
 # Usage: phase-state DESIGN_DOC
 set -euo pipefail
@@ -51,8 +72,12 @@ awk '
     sub(/:$/, "", n)
     body = $0
     sub(/^phase [0-9]+: /, "", body)
-    if (body ~ / dispatched$/) next
     if (!(n in seen)) { seen[n] = 1; order[++count] = n }
+    if (body ~ / dispatched$/) {
+      # The earlier flow ran a phase verifier between executed and verified.
+      if (body == "verifier dispatched") oldver[n] = NR
+      next
+    }
     last[n] = body
     lastnr[n] = NR
     if (body ~ /^merged to base \(/) {
@@ -61,12 +86,25 @@ awk '
       sub(/\).*$/, "", s)
       merged[n] = s
     }
-    if (body ~ /^failed/) failnr[n] = NR
-    if (body ~ /^integrating/) integnr[n] = NR
+    if (body ~ /^failed/) { failnr[n] = NR; queuedby[n] = "" }
+    if (body ~ /^executed/) { queuedby[n] = "executed"; execnr[n] = NR }
+    if (body ~ /^verified PASS /) queuedby[n] = "verified"
+    if (body ~ /^integrating/) { integnr[n] = NR; integby[n] = queuedby[n] }
+    if (body ~ /^(repair|rescue) — started/) attempts[n]++
   }
   function lastword(s,   k, w) {
     k = split(s, w, " ")
     return w[k]
+  }
+  function passsha(s,   t) {
+    t = s
+    sub(/^.*PASS +/, "", t)
+    sub(/[^0-9A-Za-z].*$/, "", t)
+    return t
+  }
+  function execsha(s,   t) {
+    if (match(s, /\.\.[0-9a-f]+/)) return substr(s, RSTART + 2, RLENGTH - 2)
+    return lastword(s)
   }
   END {
     printf "run\t%s\n", ((drain > 0 && drain > undrain) ? "draining" : "normal")
@@ -78,6 +116,7 @@ awk '
     }
     for (i = 1; i <= count; i++) {
       n = order[i]
+      if (!(n in last)) continue
       body = last[n]
       status = "active"; arg = ""
       open = ((n in integnr) && integnr[n] > failnr[n] + 0)
@@ -85,8 +124,10 @@ awk '
       else if (body ~ /^failed/) status = "failed"
       else if (open) {
         status = "integrating"
-        if (body ~ /^integration verified PASS /) { status = "landable"; arg = lastword(body) }
-        else if (body ~ /^integrating/ && body ~ / ready [0-9a-f]+$/) { status = "landable"; arg = lastword(body) }
+        if (body ~ /^integration verified PASS /) { status = "landable"; arg = passsha(body) }
+        else if (body ~ /^integrating/ && body ~ / ready [0-9a-f]+$/ && integby[n] == "verified") {
+          status = "landable"; arg = lastword(body)
+        }
       }
       else if (body ~ /^held — waits on phase [0-9]+/) {
         status = "held"
@@ -94,8 +135,9 @@ awk '
         sub(/^held — waits on phase /, "", arg)
         sub(/[^0-9].*$/, "", arg)
       }
-      else if (body ~ /^verified PASS /) { status = "verified"; arg = lastword(body) }
-      printf "%s\t%s\t%s\t%s\n", n, status, arg, lastnr[n]
+      else if (body ~ /^verified PASS /) { status = "queued"; arg = passsha(body) }
+      else if (body ~ /^executed/ && !(oldver[n] > execnr[n])) { status = "queued"; arg = execsha(body) }
+      printf "%s\t%s\t%s\t%s\t%d\n", n, status, arg, lastnr[n], attempts[n] + 0
     }
   }
 ' "$ledger"

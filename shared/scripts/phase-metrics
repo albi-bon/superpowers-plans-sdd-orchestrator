@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Print one line of size and check-count metrics for a landed phase.
+#
+# Size comes from the phase's merge commit: lines added to source files and to
+# test files, the ratio between them, and how many test files the phase
+# created. A ratio that creeps up across runs is the early sign that agents are
+# writing more tests than the testing policy asks for.
+#
+# Check counts come from the agent-checks log, when the repository keeps one:
+# a tab-separated file at <git common dir>/agent-checks.log that a repository's
+# own command guard (a Claude Code PreToolUse hook, say) appends to. Columns:
+#   epoch  branch  agent  class  decision  command
+# class is one of related, typecheck, build, full; decision is run,
+# blocked-full or blocked-repeat. Only rows for BRANCH count. Without a log,
+# the check part says so.
+#
+# Test paths match PHASE_TEST_PATHS, an extended regular expression; the
+# default covers __tests__/, test/, tests/, e2e/ and testing/ directories and
+# *.test.* / *.spec.* / *_test.* files. Source is any other file with a code
+# extension. Documentation, data, lockfiles and generated JSON count as neither.
+#
+# Exit codes:
+#   0   printed
+#   2   usage error, or MERGE_SHA is not a merge commit
+#
+# Usage: phase-metrics MERGE_SHA BRANCH
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: phase-metrics MERGE_SHA BRANCH" >&2
+  exit 2
+fi
+merge=$1
+branch=$2
+
+if ! git rev-parse --verify --quiet "$merge^2" >/dev/null; then
+  echo "'$merge' is not a merge commit" >&2
+  exit 2
+fi
+
+test_re=${PHASE_TEST_PATHS:-'(^|/)(__tests__|tests?|e2e|testing)/|\.(test|spec)\.[^/]+$|_test\.[^/]+$'}
+code_re='\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|rb|go|rs|java|kt|kts|swift|c|cc|cpp|h|hpp|m|mm|cs|php|vue|svelte|css|scss|sql|sh)$'
+
+size=$(git diff --numstat "$merge^1" "$merge" | awk -F'\t' -v t="$test_re" -v c="$code_re" '
+  $1 == "-" { next }
+  $3 ~ t { tests += $1; next }
+  $3 ~ c { src += $1 }
+  END {
+    ratio = src > 0 ? sprintf("%.2f", tests / src) : "n/a"
+    printf "source +%d, tests +%d (%s per source line)", src, tests, ratio
+  }')
+new_tests=$(git diff --name-only --diff-filter=A "$merge^1" "$merge" | grep -cE "$test_re" || true)
+
+log="$(git rev-parse --git-common-dir)/agent-checks.log"
+if [ -f "$log" ]; then
+  checks=$(awk -F'\t' -v b="$branch" '
+    $2 != b { next }
+    $5 == "run" { ran[$4]++ }
+    $5 == "blocked-full" { bfull++ }
+    $5 == "blocked-repeat" { brep++ }
+    END {
+      printf "checks: related %d, typecheck %d, build %d, full %d; blocked: full %d, repeat %d",
+        ran["related"], ran["typecheck"], ran["build"], ran["full"], bfull, brep
+    }' "$log")
+else
+  checks="checks: no agent-checks log"
+fi
+
+printf '%s, %s new test files; %s\n' "$size" "$new_tests" "$checks"

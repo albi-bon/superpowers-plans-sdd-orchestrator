@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Bring the current base into a verified phase branch, inside the phase's
-# worktree, before the phase lands.
+# Bring the current base into a built phase branch, inside the phase's
+# worktree, before the phase is verified and lands.
 #
 # Other phases may have landed on base while this one was built. Merging base
 # into the phase branch here — not the phase into base — means conflicts are
-# resolved where the phase's agents work, and base only ever receives a tree
-# that has been verified with everything already on it.
+# resolved where the phase's agents work, and the one verification a phase
+# gets runs on the tree that will land, with everything already on it.
 #
 # Prints exactly one outcome and records it in the ledger:
-#   ready <sha>   base never moved since the fork: land VERIFIED_SHA as is
+#   ready <sha>   base never moved since the fork: run the integration
+#                 verifier on <sha> (the queued commit itself)
 #   merged <sha>  base merged in cleanly: run the integration verifier on <sha>
 #   conflict      the merge stopped on conflicts and is left in progress; the
 #                 conflicted paths and the phases merged into base since the
@@ -22,14 +23,17 @@
 #   0   one of the outcomes above
 #   2   usage error, or no worktree for the phase
 #   11  worktree not clean
-#   19  the branch HEAD is not VERIFIED_SHA (nor its integration merge)
+#   19  the branch HEAD is not SHA (nor its integration merge)
 #   20  the merge failed for a reason other than conflicts; it was aborted
 #
-# Usage: phase-integrate DESIGN_DOC BASE N VERIFIED_SHA
+# SHA is the commit phase-schedule queued: the end of the lead's range, the
+# HEAD a requeue recorded, or an earlier-flow 'verified PASS' sha.
+#
+# Usage: phase-integrate DESIGN_DOC BASE N SHA
 set -euo pipefail
 
 if [ "$#" -ne 4 ]; then
-  echo "usage: phase-integrate DESIGN_DOC BASE N VERIFIED_SHA" >&2
+  echo "usage: phase-integrate DESIGN_DOC BASE N SHA" >&2
   exit 2
 fi
 doc=$1
@@ -62,7 +66,7 @@ if [ -n "$(git -C "$wt" status --porcelain)" ]; then
   exit 11
 fi
 if ! verified_sha=$(git -C "$wt" rev-parse --verify --quiet "$verified^{commit}"); then
-  echo "verified SHA '$verified' is not a commit in this repository" >&2
+  echo "SHA '$verified' is not a commit in this repository" >&2
   exit 19
 fi
 head=$(git -C "$wt" rev-parse HEAD)
@@ -81,12 +85,12 @@ if git -C "$wt" merge-base --is-ancestor "$base" HEAD; then
     echo "merged $short"
     exit 0
   fi
-  echo "phase $num HEAD $short is neither the verified commit nor its integration merge: verify again" >&2
+  echo "phase $num HEAD $short is neither the queued commit nor its integration merge: requeue the phase at its HEAD" >&2
   exit 19
 fi
 
 if [ "$head" != "$verified_sha" ]; then
-  echo "phase $num HEAD $short is not the verified $(git -C "$wt" rev-parse --short "$verified_sha"): verify again before integrating" >&2
+  echo "phase $num HEAD $short is not the queued $(git -C "$wt" rev-parse --short "$verified_sha"): requeue the phase at its HEAD" >&2
   exit 19
 fi
 

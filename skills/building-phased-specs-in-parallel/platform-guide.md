@@ -15,7 +15,7 @@ same on both hosts. Template envelopes (`Subagent (general-purpose)`, `model`,
   them from a brand.
 - **Concurrent capacity of `1 + 2 × CAP` agents**: the controller, plus up to
   `CAP` phases each running one controller-level agent (scout, overlap judge,
-  lead, verifier, repair, rescue, resolver or integration verifier) and, under
+  lead, repair, rescue, resolver or integration verifier) and, under
   a lead, one worker or reviewer. If the host allows fewer, lower `CAP` before starting and
   say so; never exceed the host's limit by queueing blind.
 - **Background dispatch**: the controller dispatches agents without blocking on
@@ -32,7 +32,10 @@ same on both hosts. Template envelopes (`Subagent (general-purpose)`, `model`,
 Use the host's bounded wait/result tools and required progress-update cadence.
 A spawn acknowledgement is not completion. Do not launch a duplicate agent
 because an existing one is taking time; reconcile its status and persisted
-output. Release finished agents if the host counts retained agents against its
+output. A host may end a background lead's turn while the worker it dispatched
+is still running, so the lead hands back without a status: wait for that
+worker's own report before dispatching a lead again, so two agents never work
+one task. Release finished agents if the host counts retained agents against its
 limit.
 
 Every agent works in its phase's worktree, never in the main checkout. Give
@@ -46,11 +49,35 @@ an inherited working directory.
 | scout, overlap judge, phase lead, reviewer, repair, rescue, resolver | most capable |
 | worker: task the brief marks `Tier: standard`, and every fix | most capable |
 | worker: task the brief marks `Tier: mechanical` | mid-tier |
-| verifier, integration verifier, graph agent | mid-tier |
+| integration verifier (gates and acceptance check, once per phase), graph agent | mid-tier |
 
 There is no cheap tier in this workflow. The scout assigns each task's tier
 under the criteria in `scout-prompt.md`; the lead applies it and does not
 downgrade a `standard` task. Fix-wave workers always use the most capable tier.
+
+
+## Check discipline and the command guard
+
+Workers run only the brief's `Checks:` — the tests related to the files they
+changed and a typecheck — and the verifier runs the `Full suites:` once. The
+templates make that likely, not certain: a worker that reaches for the root
+test command anyway costs minutes, and in a parallel run slows every phase on
+the machine.
+
+A repository can enforce it with a Claude Code `PreToolUse` hook on Bash of
+its own. On a `phase-<N>-<slug>` branch it refuses whole-suite and
+production-build commands unless they start with `FULL_CHECKS=1`, which only
+the verifier templates mention; it refuses a test command identical to one
+that already finished on the same tree; and it appends every check it sees to
+`<git common dir>/agent-checks.log`, in the format the header of
+`shared/scripts/phase-metrics` gives. The skill neither installs nor requires
+it. With or without it, each landing appends a `metrics` line to the ledger:
+lines of source and test the phase added, and the log's counts when there is
+one.
+
+Several phases building at once share one machine's cores. Cap the test
+runner's worker count per worktree in the repository's own configuration, or
+suites slow each other past tool timeouts and flake.
 
 ## Claude Code
 

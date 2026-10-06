@@ -54,7 +54,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        policy. Do not paper over a failure by weakening, skipping, or deleting
        the check that caught it.
     4. If CONFLICTS_PATH is not "none", the integration merge was aborted and
-       PHASE_BRANCH is back at its verified commit. Redo it:
+       PHASE_BRANCH is back at its built commit. Redo it:
        `git merge --no-ff BASE -m "integrate: base into phase PHASE_NUMBER"`,
        resolve every conflict so both sides' behaviour holds, regenerate
        lockfiles with the repository's package manager rather than merging
@@ -62,11 +62,13 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        with the repository's own commands (this phase's migration rebuilt on
        top of the base's latest), and conclude the merge. Adapt this phase's code to the
        base where the two cannot otherwise coexist.
-    5. Re-run every failing command from the evidence, plus the repository's
-       full gates — typecheck, lint, test, build, whatever it has — and confirm
-       each exits 0. A command that prints an all-green summary and exits
-       non-zero has NOT passed — judge by the exit code, never by the printed
-       totals.
+    5. Re-run what failed — the failing tests themselves, not the whole
+       suite that contained them — plus the brief's `Checks:` over the files
+       you changed, and confirm each exits 0. Do not run a command from the
+       brief's `Full suites:` line; the integration verifier runs the rest
+       after you. A command
+       that prints an all-green summary and exits non-zero has NOT passed —
+       judge by the exit code, never by the printed totals.
     6. Commit your work on PHASE_BRANCH and leave the working tree clean.
     7. Write RESCUE_REPORT_PATH: the root cause, why the repair missed it,
        what you changed and why, and the commands you ran with their exit

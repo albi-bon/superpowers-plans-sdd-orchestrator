@@ -19,7 +19,7 @@ exists() {
 
 # Templates an agent works in a phase worktree from.
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
-verifier-prompt.md repair-prompt.md rescue-prompt.md resolver-prompt.md
+repair-prompt.md rescue-prompt.md resolver-prompt.md
 integration-verifier-prompt.md overlap-judge-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES graph-prompt.md"
 
@@ -76,6 +76,9 @@ has lead-prompt.md '`Tier: mechanical`' 'applies the brief tier'
 has lead-prompt.md 'Never downgrade a task the brief marks `standard`' 'never downgrades a standard task'
 has lead-prompt.md 'Do not review again' 'no re-review after the fix wave'
 has lead-prompt.md 'first unticked task' 'the lead resumes from the brief'
+has lead-prompt.md 'RESUME_NOTES' 'takes a worker return the previous lead never received'
+has lead-prompt.md 'instead of dispatching
+    the task again' 'never dispatches a second worker for a finished task'
 has lead-prompt.md 'ten lines' 'return contract is capped'
 
 # --- worker-prompt.md ------------------------------------------------------
@@ -88,19 +91,12 @@ has worker-prompt.md '`Tier: mechanical`' 'model follows the brief tier'
 has worker-prompt.md 'Returning DONE with a failing check is not a valid return' 'no DONE on red'
 has worker-prompt.md 'six lines' 'return contract is capped'
 
-# --- reviewer-prompt.md, verifier-prompt.md --------------------------------
+# --- reviewer-prompt.md ----------------------------------------------------
 
 exists reviewer-prompt.md
 has reviewer-prompt.md 'PHASE_BASE_SHA..HEAD' 'reviews the phase range, not trunk'
 has reviewer-prompt.md 'Do NOT edit, fix, or commit' 'the reviewer edits nothing'
 has reviewer-prompt.md 'three lines' 'return contract is capped'
-
-exists verifier-prompt.md
-has verifier-prompt.md 'looks green and whose exit code is 1 is a FAIL' 'the exit-code rule'
-has verifier-prompt.md 'Acceptance check' 'runs the acceptance check'
-has verifier-prompt.md 'Setup:' 'can repeat the recorded setup'
-has verifier-prompt.md 'a mid-tier model' 'the verifier is mid-tier'
-has verifier-prompt.md 'three lines' 'return contract is capped'
 
 # --- repair-prompt.md ------------------------------------------------------
 
@@ -169,7 +165,22 @@ has integration-verifier-prompt.md 'SETUP_COMMAND' 'receives the setup command'
 has integration-verifier-prompt.md 'manifest or lockfile' 're-runs setup when the merge changed dependencies'
 has integration-verifier-prompt.md 'Report the exit code of every command' 'the exit-code rule'
 has integration-verifier-prompt.md 'looks green and whose exit code is 1 is a FAIL' 'an all-green print with a non-zero exit is a FAIL'
-has integration-verifier-prompt.md 'There is no acceptance' 'runs no acceptance check'
+has integration-verifier-prompt.md 'Acceptance check' 'runs the acceptance check'
+has integration-verifier-prompt.md 'met, untested' 'grades untested deliverables'
+has integration-verifier-prompt.md 'decision that removed or replaced it' 'an unexplained missing item fails'
+has integration-verifier-prompt.md 'MERGED_PHASES' 'knows which phases merged into base since the phase began'
+has integration-verifier-prompt.md 'judge them, not those of' 'judges acceptance on this phase alone'
+has integration-verifier-prompt.md 'base never moved' 'verifies a ready integration too'
+has integration-verifier-prompt.md 'no verification of its own' 'handles a phase with no Verification section'
+has integration-verifier-prompt.md 'test:integration' 'runs a separate integration-test suite'
+has integration-verifier-prompt.md 'end-to-end' 'runs an end-to-end suite'
+has integration-verifier-prompt.md 'A skipped suite never counts' 'a skipped suite is never a pass'
+has integration-verifier-prompt.md 'FULL_SUITE_POLICY' 'takes the full-suite policy'
+has integration-verifier-prompt.md 'once per phase' 'can keep the full suites to one run per phase'
+has integration-verifier-prompt.md 'The scope
+       is narrow' 're-verifies a narrow repair narrowly'
+has integration-verifier-prompt.md 'never overwrite' 'appends to the evidence, so the next verifier reads what ran'
+has integration-verifier-prompt.md "as the line's last word" 'ends its PASS line in the SHA'
 has integration-verifier-prompt.md 'Do NOT fix anything' 'the integration verifier does not repair'
 has integration-verifier-prompt.md 'a mid-tier model' 'the integration verifier is mid-tier'
 has integration-verifier-prompt.md 'three lines' 'return contract is capped'
@@ -214,5 +225,21 @@ for t in scout-prompt.md lead-prompt.md worker-prompt.md repair-prompt.md \
          rescue-prompt.md resolver-prompt.md; do
   has "$t" 'DECISION_POLICY_PATH' 'receives the decision policy'
 done
+
+# --- check discipline ------------------------------------------------------
+has testing-policy.md 'Your ceiling is one test per' 'states a test ceiling the worker works out itself'
+has testing-policy.md 'nobody hands you a list' 'the ceiling is not a list of planned tests'
+has testing-policy.md 'does not count tests' 'the reviewer does not police the ceiling'
+has testing-policy.md 'Never run the repository' 'workers never run full suites'
+has testing-policy.md 'unchanged tree' 'no repeat runs on an unchanged tree'
+has testing-policy.md 'skips the red step' 'mechanical tasks skip the red step'
+has scout-prompt.md 'Checks: related tests' 'the brief records the fast checks'
+has scout-prompt.md 'Full suites: ' 'the brief records the full suites'
+has worker-prompt.md 'brief'"'"'s `Checks:`' 'workers run the brief'"'"'s checks'
+has worker-prompt.md '`Full suites:`' 'workers are told to avoid the full suites'
+has repair-prompt.md 'the failing tests' 'repair re-runs the failing tests, not whole suites'
+has integration-verifier-prompt.md 'FULL_CHECKS=1' 'the verifier opts in to full suites'
+has rescue-prompt.md 'not the whole' 'rescue re-runs the failing tests, not whole suites'
+has resolver-prompt.md '`Full suites:`' 'the resolver avoids the full suites'
 
 finish

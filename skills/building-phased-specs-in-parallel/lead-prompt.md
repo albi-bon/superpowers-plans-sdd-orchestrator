@@ -32,6 +32,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     Testing policy:  TESTING_POLICY_PATH   (pass it on)
     Worker template:   WORKER_TEMPLATE_PATH
     Reviewer template: REVIEWER_TEMPLATE_PATH
+    Resume notes:      RESUME_NOTES          (a worker's return the previous lead never received, or "none")
 
     ## Your job
 
@@ -59,12 +60,15 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        and dispatch one worker per group, one after another, in its fix form,
        with REPORT_PATH set to RUN_DIR/phase-PHASE_NUMBER-fix-<G>-report.md.
        That is the whole wave. Do not review again afterwards: a separate
-       verifier checks the branch next.
+       verifier checks the branch once it is integrated with the base.
     6. Record every decision you made, and the count of deferred findings,
        in DECISIONS_PATH under the decision policy.
 
     If the brief already has ticked tasks, a previous lead was interrupted:
-    resume at the first unticked task. If commits exist for an unticked task,
+    resume at the first unticked task. If RESUME_NOTES carries a worker's
+    return, that worker finished after the previous lead handed back: treat
+    it as that task's return (tick the task if DONE) instead of dispatching
+    the task again. If commits exist for an unticked task,
     say so in that worker's LEAD_NOTES so it reconciles them instead of
     starting over. If the findings file already exists with an Adjudication
     section, resume at the fix wave for groups whose report does not yet exist.

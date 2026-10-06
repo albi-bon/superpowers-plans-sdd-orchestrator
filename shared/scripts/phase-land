@@ -5,9 +5,11 @@
 # The phase branch already contains the current base tip (phase-integrate saw
 # to that), so the --no-ff merge can neither conflict nor change content: the
 # merge commit's tree must equal the verified commit's tree, and the script
-# checks that it does. Base therefore only ever holds a tree a verifier
-# passed. Checks run before anything moves; on any failure base is put back
-# exactly where it was.
+# checks that it does. It also refuses unless the ledger shows that very
+# commit passed its integration verifier (phase-state's 'landable'): an
+# integration that printed 'ready' is not landable by itself. Base therefore
+# only ever holds a tree a verifier passed. Checks run before anything moves;
+# on any failure base is put back exactly where it was.
 #
 # Exit codes:
 #   0   landed and recorded
@@ -19,6 +21,7 @@
 #   19  the phase branch HEAD is not VERIFIED_SHA
 #   20  the merge failed or changed content; base was restored
 #   21  base moved past the verified commit's base: integrate again
+#   22  the ledger does not show VERIFIED_SHA as landable for this phase
 #
 # Usage: phase-land DESIGN_DOC BASE N VERIFIED_SHA
 set -euo pipefail
@@ -77,6 +80,13 @@ if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
   exit 21
 fi
 
+landable=$("$here/phase-state" "$doc" | awk -F'\t' -v n="$num" '$1 == n && $2 == "landable" { print $3 }')
+if [ -z "$landable" ] \
+  || [ "$(git -C "$main" rev-parse --verify --quiet "$landable^{commit}" || true)" != "$verified_sha" ]; then
+  echo "phase $num has no passing integration verification of $(git -C "$main" rev-parse --short "$verified_sha") in the ledger: verify it before landing" >&2
+  exit 22
+fi
+
 before=$(git -C "$main" rev-parse HEAD)
 if ! git -C "$main" merge -q --no-ff "$branch" -m "merge: phase $num — $title" >/dev/null 2>&1; then
   git -C "$main" merge --abort >/dev/null 2>&1 || git -C "$main" reset -q --hard "$before"
@@ -91,6 +101,10 @@ fi
 
 merged=$(git -C "$main" rev-parse --short HEAD)
 printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+# Metrics are a record, not a gate: a failure here never fails the landing.
+if metrics=$(cd "$main" && "$here/phase-metrics" "$merged" "$branch" 2>/dev/null); then
+  printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
+fi
 if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
   echo "note: worktree of phase $num kept — it holds untracked files" >&2
 fi

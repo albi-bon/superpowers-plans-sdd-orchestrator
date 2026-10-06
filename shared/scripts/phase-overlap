@@ -15,7 +15,7 @@
 #     base. A path ending in '/' matches everything under it. A path matching
 #     an ignore pattern (below) never counts, on either side.
 #
-# In flight means the status phase-state reports as active, verified,
+# In flight means the status phase-state reports as active, queued,
 # integrating or landable. Held, failed and merged phases are not compared
 # against, so holds cannot form a cycle: the later of two clashing phases is
 # always the one held.
@@ -265,7 +265,7 @@ mine=$(brief_paths "$brief" | normalise)
 [ -n "$mine" ] || clear_result
 
 others=$(printf '%s\n' "$state" | awk -F'\t' -v n="$num" '
-  $1 != "run" && $1 != n && ($2 == "active" || $2 == "verified" || $2 == "integrating" || $2 == "landable") { print $1 }
+  $1 != "run" && $1 != n && ($2 == "active" || $2 == "queued" || $2 == "integrating" || $2 == "landable") { print $1 }
 ')
 
 found=''

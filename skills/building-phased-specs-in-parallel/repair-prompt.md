@@ -1,8 +1,8 @@
 # Repair Dispatch Template
 
-The first of a phase's two attempts. Dispatched at most once per phase, after a
-verifier or integration verifier FAIL. There is never a second repair: if this
-one does not hold, the rescue agent takes the phase with a wider mandate, and
+The first of a phase's two attempts. Dispatched at most once per phase, after an
+integration verifier FAIL. There is never a second repair: if this one does not
+hold, the rescue agent takes the phase with a wider mandate, and
 after that the phase has failed. Substitute every uppercase placeholder value
 before dispatching.
 
@@ -16,8 +16,9 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Read applicable repository instructions. All artifact paths below are absolute.
 
-    A phase of a phased design document was implemented and then failed
-    verification. You are fixing it. You get one attempt.
+    A phase of a phased design document was implemented, integrated with
+    the base branch, and then failed verification. You are fixing it.
+    You get one attempt.
 
     Phase branch:    PHASE_BRANCH          (checked out in WORKTREE)
     Base branch:     BASE
@@ -46,7 +47,12 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     3. Diagnose and fix the root cause. A `missing` deliverable is built, with
        tests as the testing policy says. Do not paper over a failure by
        weakening, skipping, or deleting the check that caught it.
-    4. Re-run the failing commands yourself and confirm each one now exits 0.
+    4. Re-run what failed and confirm each one now exits 0: the failing tests
+       themselves (the files or names the evidence points at) and the brief's
+       `Checks:` over the files you changed. Do not re-run a whole suite from
+       the brief's `Full suites:` line; the verifier runs it again.
+       Keep the fix confined to what the failure needs: the next verifier
+       re-runs only what a narrow change touches.
        A command that prints an all-green summary and exits non-zero has NOT
        passed — judge by the exit code, never by the printed totals.
     5. Commit your fix on PHASE_BRANCH and leave the working tree clean.

@@ -35,10 +35,10 @@ controller — and adds:
    back when its scout finds it needs something an in-flight phase is building, or when
    an overlap judge finds it and an in-flight phase both making major changes to the
    same domain. Shared files alone only send the phase to the judge;
-4. an **integration step** that merges the moved base into a verified phase branch,
-   resolves textual conflicts with a resolver agent, re-runs the gates on the integrated
-   result, and only then lands the phase on base — so base only ever holds verified
-   trees;
+4. an **integration step** that merges the moved base into a built phase branch,
+   resolves textual conflicts with a resolver agent, verifies the integrated result once
+   — gates and acceptance check — and only then lands the phase on base, so base only
+   ever holds verified trees;
 5. an **escalation ladder** — repair, then rescue — before a failing phase stops the
    run, and a **drain** instead of an immediate halt: nothing new starts, in-flight
    phases finish and land, then the run stops.
@@ -97,10 +97,9 @@ loop until phase-schedule reports nothing running and nothing to do:
     when any agent returns, advance its phase:
       ① scout done   → phase-overlap N  → clear: ② phase lead │ prereq: held
                                            │ overlap: judge → run: ② │ hold: held
-      ② lead DONE    → ③ verifier
-      ③ PASS         → queued for integration
-      ③ FAIL         → ladder (§3.7)
+      ② lead DONE    → queued for integration
       resolver / integration verifier → §3.6
+      integration verifier FAIL       → ladder (§3.7)
 report
 ```
 
@@ -119,11 +118,10 @@ main session (controller)
 │  │  ├─ Agent: task worker      one per task, sequential
 │  │  ├─ Agent: reviewer         once
 │  │  └─ Agent: fix worker       one per finding group, at most one wave
-│  ├─ Agent: verifier
 │  ├─ Agent: repair              ladder attempt 1
 │  ├─ Agent: rescue              ladder attempt 2
 │  ├─ Agent: resolver            only on a textual conflict at integration
-│  └─ Agent: integration verifier
+│  └─ Agent: integration verifier  the phase's one verification
 ```
 
 Three agent levels, as in `building-phased-specs`. Only the phase lead nests. At most
@@ -137,7 +135,7 @@ host must allow `1 + 2 × CAP` concurrent agents.
 | scout, phase lead, reviewer, repair, rescue, resolver | most capable |
 | task worker | the brief's tier: mid-tier for `Tier: mechanical`, most capable otherwise |
 | fix worker | most capable |
-| verifier, integration verifier, graph agent | mid-tier |
+| integration verifier, graph agent | mid-tier |
 
 Tiers resolve to host models through the platform guide (`opus` / `sonnet` on Claude
 Code). Every dispatch names its model explicitly.
@@ -226,15 +224,15 @@ On resume the existing `graph.tsv` is reused, never regenerated.
 
 ### 3.6 Integration
 
-The controller integrates **one phase at a time**, in the order phases reached
-`verified PASS`. Other phases keep building meanwhile. Base moves only through
+The controller integrates **one phase at a time**, in the order their leads returned
+`DONE`. Other phases keep building meanwhile. Base moves only through
 `phase-land`, which the controller never runs while another integration is open, so an
 integrated SHA cannot go stale during its own integration.
 
-1. `phase-integrate N VERIFIED_SHA`, in the phase's worktree:
-   - refuses a dirty worktree, or a branch HEAD other than `VERIFIED_SHA`;
+1. `phase-integrate N SHA`, in the phase's worktree, with the SHA the scheduler queued:
+   - refuses a dirty worktree, or a branch HEAD other than `SHA`;
    - base tip already an ancestor of HEAD — base never moved since the fork: prints
-     `ready <sha>`, go to step 4;
+     `ready <sha>`, go to step 3;
    - otherwise runs `git merge --no-ff BASE -m "integrate: base into phase <N>"`:
      - clean: prints `merged <sha>`; go to step 3;
      - conflict: leaves the merge in progress, writes the conflicted paths and the
@@ -246,28 +244,40 @@ integrated SHA cannot go stale during its own integration.
    package manager. Runs fast checks on the touched files. Commits the merge. Records
    decisions in phase N's decisions file — significant when either phase's behaviour
    changed. Returns `RESOLVED <sha>`, or `UNRESOLVED` after running `git merge --abort`,
-   which puts the worktree back at the verified SHA.
-3. **Integration verifier.** Gates only — typecheck, lint, test, build — on the
-   integrated HEAD. If the merge changed a manifest or lockfile, it runs the setup first.
-   No acceptance check; the phase verifier already did that and the merge added only
-   base's verified content. Evidence goes to `phase-<N>-integration-evidence.md`.
-   `PASS <sha>` → step 4. `FAIL` → ladder (§3.7), with the conflicts file and merged
-   phases' briefs in the attempt's context.
+   which puts the worktree back at the queued SHA.
+3. **Integration verifier**, on every outcome, `ready` included: the phase's only
+   verification. Every gate the repository has — typecheck, lint, the root test suite,
+   a separate integration suite needing a database or Docker, an end-to-end suite when
+   its infrastructure can be started, build — and the acceptance check on this phase's
+   deliverables, told which phases merged into base since it began. If the merge
+   changed a manifest or lockfile, it runs the setup first. It appends to
+   `phase-<N>-integration-evidence.md`; a re-verification after a narrow repair re-runs
+   only the affected suites and acceptance items, and the owner's `full suite: once per
+   phase` keeps the slow full suites to one run per phase. `PASS <sha>` → step 4.
+   `FAIL` → ladder (§3.7), with the conflicts file and merged phases' briefs in the
+   attempt's context.
+
+   Amended after a live run: the original design verified each phase twice, gates and
+   acceptance on the phase branch, then gates again after the merge. With base moving
+   under most phases, the slow suites ran twice per phase. One verification on the
+   integrated tree keeps the acceptance check, which in that run was the only thing to
+   catch a real bug. Landing several phases under one shared check was rejected: it
+   puts unverified trees on base and blurs which phase failed.
 4. `phase-land N SHA`, in the main checkout (§4.6). Base fast-forwards in content to
    exactly the verified tree, with a `--no-ff` merge commit for history.
 
 ### 3.7 The escalation ladder
 
-Every phase has a budget of **two attempts**, shared between phase verification and
-integration.
+Every phase has a budget of **two attempts**, each followed by the integration verifier
+again.
 
 | Attempt | Agent | Mandate |
 |---|---|---|
 | 1 | **repair** | Scoped fix of what the evidence names. Never weakens, skips or deletes the check that caught it. |
 | 2 | **rescue** | Fresh eyes with a wider mandate: reads both evidence files, the repair's report, the brief and decisions. May change approach, rework a task, re-scope against the current base, build a missing prerequisite, or redo the integration merge. Every departure from the brief is significant. |
 
-- Phase-verify FAIL → repair → verify → rescue → verify → drain.
-- Integration-verify FAIL → the next unused attempt → integration verify again.
+- Integration-verify FAIL → repair → integration verify → rescue → integration verify
+  → drain.
 - Resolver `UNRESOLVED` → rescue directly, if unused. A repair is a scoped fix and an
   unresolved merge is not one. Rescue redoes the integration merge itself.
 - Budget spent and still failing → the phase is **failed** and the run **drains**.
@@ -278,7 +288,7 @@ The ledger records each start before the dispatch:
 ### 3.8 Drain
 
 Draining means: `phase-schedule` emits no `start` and no `rescout`; every in-flight phase
-continues through verification and integration and lands; then the run stops and
+continues through integration and verification and lands; then the run stops and
 reports. Base ends at the last landed phase, verified. Phases that depend on the failed
 phase never start. Held phases waiting on it stay held.
 
@@ -333,11 +343,11 @@ The building skill's templates are copied into the new skill directory and chang
 | Template | Change |
 |---|---|
 | `scout-prompt.md` | `REPO_ROOT` becomes `WORKTREE`. Runs setup (§4.2). Reads the decisions files of phases already merged to base — their code is what it grounds against — and never those of in-flight phases. Receives `IN_FLIGHT_PHASES`. Return gains `prereq-inflight: phase <M>` or `prereq-inflight: none`. |
-| `lead-prompt.md`, `worker-prompt.md`, `reviewer-prompt.md`, `verifier-prompt.md` | `REPO_ROOT` becomes `WORKTREE`. Each states: never touch the main checkout, `BASE`, or another phase's worktree or branch. |
+| `lead-prompt.md`, `worker-prompt.md`, `reviewer-prompt.md` | `REPO_ROOT` becomes `WORKTREE`. Each states: never touch the main checkout, `BASE`, or another phase's worktree or branch. |
 | `repair-prompt.md` | Optional integration context: the conflicts file and merged phases' briefs and decisions. |
 | `rescue-prompt.md` (new) | §3.7. The one agent besides the resolver allowed to run `git merge BASE` in its worktree, and only to redo an integration. Return: `FIXED` or `STILL_BROKEN`, root cause, commands re-run with exit codes, commit SHAs, significant count. |
 | `resolver-prompt.md` (new) | §3.6 step 2. Return: `RESOLVED <sha>` or `UNRESOLVED`, conflicted file count, significant count. |
-| `integration-verifier-prompt.md` (new) | §3.6 step 3. Return: `PASS` or `FAIL` plus SHA, one-line reason, evidence path. |
+| `integration-verifier-prompt.md` (new) | §3.6 step 3; absorbs `verifier-prompt.md`'s acceptance check, which has no separate template here. Return: `PASS` or `FAIL` plus SHA, one-line reason, evidence path. |
 | `graph-prompt.md` (new) | §3.5. Writes `graph.tsv`. Return: path, phase count, edge count. Edits nothing else. |
 | `decision-policy.md` | Adds the worktree boundary rule. `BLOCKED` list unchanged. |
 | `testing-policy.md` | Unchanged. |
@@ -400,6 +410,9 @@ A failed phase is recorded as `phase <N>: failed — <reason>` before the run's
 2. Refuses if the phase branch HEAD is not `VERIFIED_SHA`.
 3. Refuses if the base tip is not an ancestor of `VERIFIED_SHA` — base moved and the
    phase needs integrating again.
+3a. Refuses unless `phase-state` reports the phase `landable` at `VERIFIED_SHA`: an
+   `integration verified PASS` for that commit (or, in a ledger from the original
+   two-verifier flow, a `ready` integration after a phase-verifier pass).
 4. `git merge --no-ff phase-<N>-<slug> -m "merge: phase <N> — <title>"`.
 5. Asserts the merge commit's tree equals `VERIFIED_SHA`'s tree. On a mismatch, or any
    merge failure: `git merge --abort` or `git reset --hard ORIG_HEAD` back to the
@@ -411,8 +424,10 @@ Failed and drained phases keep their worktrees for inspection.
 ### 4.7 `phase-schedule`, `phase-overlap`, `phase-integrate`
 
 `phase-state DESIGN_DOC` reads the ledger and prints each started phase's status —
-`active`, `held`, `verified`, `integrating`, `landable`, `merged` or `failed` — and
-whether the run is draining. `phase-schedule` and `phase-overlap` both read the ledger
+`active`, `held`, `queued`, `integrating`, `landable`, `merged` or `failed`, with
+ladder attempts used — and whether the run is draining. An `executed` line queues a
+phase; so does a `verified PASS` line from the original flow, after which a `ready`
+integration stays landable, so a ledger begun under that flow keeps its meaning. `phase-schedule` and `phase-overlap` both read the ledger
 through it, so they cannot disagree.
 
 `phase-schedule DESIGN_DOC BASE RANGE CAP` reads `graph.tsv` and `phase-state` and
@@ -428,7 +443,7 @@ not already running per its `dispatched` lines, then waits for the next return.
 recorded in one place. Prints `clear`, `held <M> prereq-inflight`, or
 `overlap <M>[,<M>…] <paths>` for the overlap judge.
 
-`phase-integrate DESIGN_DOC BASE N VERIFIED_SHA` implements §3.6 step 1. Appends the
+`phase-integrate DESIGN_DOC BASE N SHA` implements §3.6 step 1. Appends the
 `integrating` or `conflict` line. Idempotent: re-run after an interruption, it detects a
 merge in progress (prints `conflict`) or base already in HEAD (prints `ready`).
 
@@ -448,8 +463,8 @@ another spec or base, as today, and additionally runs `phase-worktree check`.
 - A started phase whose worktree directory is gone: `phase-worktree start` re-attaches.
 - An integration with no outcome line: `phase-integrate` again; it is idempotent.
 - Ladder attempts already started stay consumed.
-- `run: draining` recorded: the failed phase is verified again first, in case the owner
-  fixed it by hand. `PASS` appends `run: undrained — phase <N> verified PASS` and normal
+- `run: draining` recorded: the failed phase is requeued at its HEAD first, in case the
+  owner fixed it by hand, and integrated and verified again. `PASS` appends `run: undrained — phase <N> verified PASS` and normal
   scheduling resumes; `FAIL` drains again without a new attempt.
 - A dirty main checkout or a dirty phase worktree fails preflight and is named. Never
   stash, discard or commit an interrupted agent's changes.

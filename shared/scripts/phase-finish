@@ -89,4 +89,8 @@ fi
 
 merged=$(git rev-parse --short HEAD)
 printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+# Metrics are a record, not a gate: a failure here never fails the landing.
+if metrics=$("$here/phase-metrics" "$merged" "$branch" 2>/dev/null); then
+  printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
+fi
 echo "phase $num merged to $base ($merged)"
