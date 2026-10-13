@@ -257,8 +257,8 @@ State these to your human partner when they matter; do not paper over them.
    its own implementers, halt and say so; do not silently inline their work.
 5. **Nothing checks that a plan was actually split.** A planner that ignores
    override 3 writes one `plan.md` holding every task; the executor reads it
-   whole and the run succeeds at the old cost. The saving is a convention, not a
-   mechanism. The executor's pre-flight conflict scan is scoped to the ledger for
+   whole and the run succeeds without the saving the split exists for. The saving is
+   a convention, not a mechanism. The executor's pre-flight conflict scan is scoped to the ledger for
    the same reason it is cheap — no agent compares two task files before
    execution starts, and the phase's single whole-branch review is the only net
    under a plan that contradicts itself.
