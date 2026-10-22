@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Print a one-line summary of the parallel run in the current repository, for
+# Claude Code's status line. Prints nothing when there is no run to show, and
+# always exits 0, so it can sit inside any status line command.
+#
+# Claude Code pipes the session's JSON to a status line command on stdin; the
+# directory comes from its workspace.current_dir (or cwd), else from DIR, else
+# from the working directory. A session inside a phase worktree finds the run
+# through the main checkout.
+#
+# The run shown is the most recently written ledger under
+# .superpowers/<namespace>/ whose run has not finished (no 'RUN COMPLETE' or
+# 'run: PR' line) and that was written in the last 7 days. Example:
+#
+#   feat/x · 2/6 merged · 2 building · 1 queued · batch 3 verifying 2 · 1 repairing · 1 held · 1 left · idle 40m
+#
+#   merged     phases landed on base, of the phases requested
+#   building   scout, overlap judge or lead at work
+#   queued     built, waiting for the next batch
+#   batch K    the open batch: merging, resolving (a conflict), verifying or
+#              landing, and how many phases it holds
+#   repairing  failed in a batch: waiting for, or in, a repair or rescue
+#   held       waiting on another phase's domain change
+#   failed     ladder spent
+#   left       requested and not started yet
+#   draining   a phase failed; nothing new starts
+#   idle       time since the ledger last changed, when over 15 minutes
+# Counts of zero are left out. '+N runs' means other runs are also active.
+#
+# Usage: phase-statusline [DIR]   (session JSON on stdin, optional)
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+namespace=${PHASE_RUN_NAMESPACE:-phase-parallel}
+
+input=""
+[ -t 0 ] || input=$(cat)
+dir=${1:-}
+if [ -z "$dir" ] && [ -n "$input" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    dir=$(printf '%s' "$input" | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
+  else
+    dir=$(printf '%s' "$input" | sed -n 's/.*"current_dir" *: *"\([^"]*\)".*/\1/p' | head -n 1)
+  fi
+fi
+[ -n "$dir" ] && [ -d "$dir" ] || dir=$PWD
+
+main=$(git -C "$dir" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+[ -n "$main" ] || exit 0
+root="$main/.superpowers/$namespace"
+[ -d "$root" ] || exit 0
+
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+now=$(date +%s)
+best=""; best_t=0; others=0
+for ledger in "$root"/*/run.md; do
+  [ -f "$ledger" ] || continue
+  grep -q '^RUN COMPLETE\|^run: PR ' "$ledger" && continue
+  t=$(mtime "$ledger")
+  [ $((now - t)) -le 604800 ] || continue
+  if [ -n "$best" ]; then others=$((others + 1)); fi
+  if [ "$t" -gt "$best_t" ]; then best=$ledger; best_t=$t; fi
+done
+[ -n "$best" ] || exit 0
+
+doc=$(sed -n '1s/^# Phase run — spec: //p' "$best")
+base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$best")
+range=$(sed -n '2s/^# base: .*  requested: //p' "$best")
+case "$doc" in /*) ;; *) doc="$main/$doc" ;; esac
+[ -f "$doc" ] || exit 0
+
+requested=$(cd "$main" && "$here/parse-phases" "$doc" "$range" 2>/dev/null | cut -f1 | tr '\n' ' ')
+state=$(cd "$main" && PHASE_RUN_NAMESPACE=$namespace "$here/phase-state" "$doc" 2>/dev/null) || exit 0
+
+REQUESTED=$requested STATE=$state BASE=$base AGE=$((now - best_t)) OTHERS=$others awk '
+  BEGIN {
+    n = split(ENVIRON["REQUESTED"], req, " ")
+    for (i = 1; i <= n; i++) if (req[i] != "") { want[req[i]] = 1; total++ }
+    k = split(ENVIRON["STATE"], rows, "\n")
+    for (i = 1; i <= k; i++) {
+      split(rows[i], f, "\t")
+      if (f[1] == "run") { draining = (f[2] == "draining"); continue }
+      if (f[1] == "batch") {
+        if (f[3] == "open") { bk = f[2]; bst = "merging" }
+        else if (f[3] == "conflict") { bk = f[2]; bst = "resolving" }
+        else if (f[3] == "built") { bk = f[2]; bst = "verifying" }
+        else if (f[3] == "landable") { bk = f[2]; bst = "landing" }
+        continue
+      }
+      started[f[1]] = 1
+      s = f[2]
+      if (s == "merged") merged++
+      else if (s == "active" && f[5] + 0 > 0) repairing++
+      else if (s == "active") building++
+      else if (s == "failing") repairing++
+      else if (s == "queued") queued++
+      else if (s == "batched") batched++
+      else if (s == "held") held++
+      else if (s == "failed") failed++
+    }
+    for (p in want) if (!(p in started)) left++
+    out = ENVIRON["BASE"] " · " (merged + 0) "/" (total + 0) " merged"
+    if (draining) out = out " · draining"
+    if (building) out = out " · " building " building"
+    if (queued) out = out " · " queued " queued"
+    if (bk != "") out = out " · batch " bk " " bst " " (batched + 0)
+    if (repairing) out = out " · " repairing " repairing"
+    if (held) out = out " · " held " held"
+    if (failed) out = out " · " failed " failed"
+    if (left) out = out " · " left " left"
+    age = ENVIRON["AGE"] + 0
+    if (age > 900) {
+      if (age < 3600) out = out " · idle " int(age / 60) "m"
+      else if (age < 172800) out = out " · idle " int(age / 3600) "h"
+      else out = out " · idle " int(age / 86400) "d"
+    }
+    if (ENVIRON["OTHERS"] + 0 > 0) out = out " · +" ENVIRON["OTHERS"] " runs"
+    print out
+  }'
+exit 0

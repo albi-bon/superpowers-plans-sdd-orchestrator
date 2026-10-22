@@ -25,7 +25,9 @@ Check available agent tools, models, concurrent-agent capacity, workspace
 permissions, push credentials and `gh auth status` before mutating Git. A skill
 cannot grant permissions; unattended runs need a session already configured for
 the repository, Git, `git push`, `gh`, the test runner, the repository's install
-command, and this skill's scripts.
+command, and this skill's scripts. The owner can follow a run from Claude Code's
+status line with `scripts/phase-statusline` (platform-guide.md § Watching a run
+from the status line); you never need to call it.
 
 **You are a thin controller.** You never read a brief, code, a diff, findings,
 a conflicts file or a test log. Artifacts live in files, dispatches carry paths,

@@ -31,7 +31,7 @@ assert_contains 'use building-phased-specs-in-parallel' "$(sed -n '3p' "$BUILD/S
 
 for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scripts/parse-deps \
          scripts/phase-state scripts/phase-schedule scripts/phase-overlap scripts/phase-worktree \
-         scripts/phase-batch scripts/phase-land scripts/phase-push scripts/phase-pr \
+         scripts/phase-batch scripts/phase-land scripts/phase-push scripts/phase-pr scripts/phase-statusline \
          scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
          overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do

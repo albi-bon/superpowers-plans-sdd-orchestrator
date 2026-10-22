@@ -43,6 +43,11 @@ installed.
 authenticated `gh` for the pull request. Read
 each skill's `platform-guide.md` for dispatch, model mapping and permissions.
 
+To follow a parallel run from Claude Code's status line (merged, building,
+queued, the open batch, repairing, held, left), add
+`skills/building-phased-specs-in-parallel/scripts/phase-statusline` to your
+status line command; see that skill's `platform-guide.md`.
+
 ## Invoke
 
 Invoking by name is deterministic:
@@ -67,7 +72,8 @@ those plans executed inline or name it.
 ```
 shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
-                         phase-overlap, phase-worktree, phase-batch, phase-land, phase-push, phase-pr
+                         phase-overlap, phase-worktree, phase-batch, phase-land, phase-push, phase-pr,
+                         phase-statusline
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill
 skills/<name>/           SKILL.md, dispatch templates, platform guide
 skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace

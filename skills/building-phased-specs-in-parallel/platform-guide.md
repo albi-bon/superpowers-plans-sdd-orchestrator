@@ -117,6 +117,42 @@ repository's install command, which every phase's scout runs in a fresh
 worktree, `git push`, and `gh pr create`. Bypass-permissions is not a requirement and the skill must not enable
 it itself.
 
+### Watching a run from the status line
+
+`scripts/phase-statusline` prints one line about the run in the session's
+repository, or nothing when there is none:
+
+```
+feat/x · 2/6 merged · 2 building · 1 queued · batch 3 verifying 2 · 1 repairing · 1 held · 1 left
+```
+
+Merged phases of those requested; phases building (scout, judge, lead);
+queued for the next batch; the open batch and what it is doing (merging,
+resolving, verifying, landing) with its phase count; repairing (failed in a
+batch, in or awaiting the ladder); held; failed; not started. It adds
+`draining` while the run drains, `idle <age>` when the ledger has not changed
+for 15 minutes, and `+N runs` when other runs are active. It reads only the
+ledger, through `phase-state`, and always exits 0.
+
+Without a status line of your own, point Claude Code at it in
+`~/.claude/settings.json`:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "bash ~/.claude/skills/building-phased-specs-in-parallel/scripts/phase-statusline"
+}
+```
+
+With one, pass it the same session JSON and append its output, for example:
+
+```bash
+run=$(printf '%s' "$input" | bash ~/.claude/skills/building-phased-specs-in-parallel/scripts/phase-statusline)
+[ -n "$run" ] && printf ' · %s' "$run"
+```
+
+The skill never edits the owner's settings or status line script.
+
 ## Codex
 
 Installation: `./install.sh codex parallel` links the skill into
