@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Push one branch of a parallel run to origin, and record the outcome.
+#
+# 'phase-push … N' pushes phase N's branch: a backup of a phase whose lead
+# finished, or of a repaired phase, taken before it waits for a batch.
+# 'phase-push … base' pushes the base branch; phase-land calls it after every
+# landed batch, and phase-pr before opening the pull request.
+#
+# A push is a backup, not a gate: a failure (no origin, no network, a
+# rejected update) is recorded and printed, and the script still exits 0, so
+# it never fails a phase. The next push of the same branch retries it. Git is
+# told never to prompt, so an unattended run cannot park on a credential
+# prompt.
+#
+# Prints one line and appends it to the ledger:
+#   push: <branch> at <sha>
+#   push: <branch> failed — <git's first error line>
+#
+# Exit codes:
+#   0   pushed, or the failure was recorded
+#   2   usage error
+#   18  the branch does not exist
+#
+# Usage: phase-push DESIGN_DOC BASE N|base
+set -euo pipefail
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: phase-push DESIGN_DOC BASE N|base" >&2
+  exit 2
+fi
+doc=$1
+base=$2
+what=$3
+
+here=$(cd "$(dirname "$0")" && pwd)
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+case "$what" in
+  base) branch=$base ;;
+  '' | *[!0-9]*) echo "usage: phase-push DESIGN_DOC BASE N|base" >&2; exit 2 ;;
+  *) branch="phase-$what-$("$here/parse-phases" "$doc" "$what" | cut -f3)" ;;
+esac
+if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+  echo "branch '$branch' does not exist" >&2
+  exit 18
+fi
+ledger="$("$here/phase-run-dir" "$doc")/run.md"
+short=$(git rev-parse --short "refs/heads/$branch")
+
+set +e
+err=$(GIT_TERMINAL_PROMPT=0 git push -q origin "refs/heads/$branch:refs/heads/$branch" 2>&1 </dev/null)
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+  line="push: $branch at $short"
+else
+  reason=$(printf '%s\n' "$err" | grep -v '^ *$' | head -n 1 | sed 's/^error: //; s/^fatal: //')
+  line="push: $branch failed — ${reason:-git push exited $rc}"
+fi
+printf '%s\n' "$line" >> "$ledger"
+printf '%s\n' "$line"

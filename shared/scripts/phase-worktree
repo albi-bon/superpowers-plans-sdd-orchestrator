@@ -17,8 +17,9 @@
 #              'phase N: released — phase M merged'. Refuses a branch that has
 #              commits of its own: only a phase that has not been built yet
 #              can be moved this way.
-#   check      refuse when any phase worktree is dirty, unless the ledger
-#              shows that phase integrating and the worktree is mid-merge.
+#   check      refuse when any phase worktree is dirty. The integration
+#              worktree is not checked: phase-batch discards what a verifier
+#              left there and aborts a merge of its own it did not record.
 #   remove N   remove a landed phase's worktree; keep its branch.
 #   path N     print the worktree path.
 #
@@ -152,17 +153,11 @@ case "$sub" in
 
   check)
     [ -d "$wtroot" ] || exit 0
-    state=$("$here/phase-state" "$doc")
     bad=0
     for path in "$wtroot"/phase-*; do
       [ -d "$path" ] || continue
       registered "$path" || continue
       [ -n "$(git -C "$path" status --porcelain)" ] || continue
-      n=$(basename "$path" | sed 's/^phase-\([0-9][0-9]*\)-.*/\1/')
-      st=$(printf '%s\n' "$state" | awk -F'\t' -v n="$n" '$1 == n { print $2 }')
-      if git -C "$path" rev-parse -q --verify MERGE_HEAD >/dev/null && [ "$st" = "integrating" ]; then
-        continue
-      fi
       echo "worktree not clean: $path — an interrupted agent left changes; inspect them (git -C '$path' status)" >&2
       bad=1
     done

@@ -1,40 +1,45 @@
 #!/usr/bin/env bash
-# Land one verified, integrated phase on the base branch, in the main
-# checkout, and record it.
+# Land one verified integration batch on the base branch, in the main
+# checkout, record every phase it carries, and push base.
 #
-# The phase branch already contains the current base tip (phase-integrate saw
-# to that), so the --no-ff merge can neither conflict nor change content: the
-# merge commit's tree must equal the verified commit's tree, and the script
-# checks that it does. It also refuses unless the ledger shows that very
-# commit passed its integration verifier (phase-state's 'landable'): an
-# integration that printed 'ready' is not landable by itself. Base therefore
-# only ever holds a tree a verifier passed. Checks run before anything moves;
-# on any failure base is put back exactly where it was.
+# The batch branch was built off the base tip (phase-batch saw to that) and
+# base cannot move while a batch is open, so landing is a fast-forward: base
+# ends at exactly the commit the integration verifier passed. The script
+# refuses unless the ledger shows that very commit passed (phase-state's
+# 'landable'), so base only ever holds a tree a verifier passed. Checks run
+# before anything moves.
+#
+# For every 'merge: phase <N> — …' commit the fast-forward brings in, it
+# appends 'phase <N>: merged to base (<sha>)' and a metrics line, and removes
+# that phase's worktree, keeping its branch. Then it appends
+# 'batch <K>: landed (<sha>)' and pushes base (phase-push). A failed push is
+# recorded and never undoes the landing.
 #
 # Exit codes:
 #   0   landed and recorded
 #   2   usage error
 #   11  main checkout not clean
 #   13  main checkout is not on BASE
-#   17  the ledger already records this phase as merged
-#   18  the phase branch does not exist
-#   19  the phase branch HEAD is not VERIFIED_SHA
-#   20  the merge failed or changed content; base was restored
-#   21  base moved past the verified commit's base: integrate again
-#   22  the ledger does not show VERIFIED_SHA as landable for this phase
+#   17  the ledger already records this batch as landed (a re-run after an
+#       interruption before that line finishes the landing instead)
+#   18  the batch branch does not exist
+#   19  the batch branch is not at VERIFIED_SHA
+#   20  the fast-forward failed; base unchanged
+#   21  base moved past the batch's base: build the batch again
+#   22  the ledger does not show VERIFIED_SHA as landable for this batch
 #
-# Usage: phase-land DESIGN_DOC BASE N VERIFIED_SHA
+# Usage: phase-land DESIGN_DOC BASE K VERIFIED_SHA
 set -euo pipefail
 
 if [ "$#" -ne 4 ]; then
-  echo "usage: phase-land DESIGN_DOC BASE N VERIFIED_SHA" >&2
+  echo "usage: phase-land DESIGN_DOC BASE K VERIFIED_SHA" >&2
   exit 2
 fi
 doc=$1
 base=$2
-num=$3
+k=$3
 verified=$4
-case "$num" in '' | *[!0-9]*) echo "phase number must be an integer" >&2; exit 2 ;; esac
+case "$k" in '' | *[!0-9]*) echo "batch number must be an integer" >&2; exit 2 ;; esac
 
 here=$(cd "$(dirname "$0")" && pwd)
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -48,15 +53,13 @@ if [ "$(git -C "$main" branch --show-current)" != "$base" ]; then
   exit 13
 fi
 if [ -n "$(git -C "$main" status --porcelain)" ]; then
-  echo "main checkout not clean: the merge would carry unverified changes (git status)" >&2
+  echo "main checkout not clean: landing would carry unverified changes (git status)" >&2
   exit 11
 fi
 
-record=$("$here/parse-phases" "$doc" "$num")
-title=$(printf '%s\n' "$record" | cut -f2)
-branch="phase-$num-$(printf '%s\n' "$record" | cut -f3)"
+branch="phase-batch-$k"
 if ! git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
-  echo "phase branch '$branch' does not exist" >&2
+  echo "batch branch '$branch' does not exist" >&2
   exit 18
 fi
 if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit}"); then
@@ -64,48 +67,66 @@ if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit
   exit 19
 fi
 if [ "$(git -C "$main" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
-  echo "phase branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify again before landing" >&2
+  echo "batch branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify it again before landing" >&2
   exit 19
 fi
 
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
-if [ -f "$ledger" ] && grep -q "^phase $num: merged to base (" "$ledger"; then
-  echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
+if [ -f "$ledger" ] && grep -q "^batch $k: landed (" "$ledger"; then
+  echo "batch $k is already recorded as landed; reconcile the ledger and git log" >&2
   exit 17
 fi
 
 if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
-  echo "base '$base' moved past what phase $num was integrated with: integrate again" >&2
+  echo "base '$base' moved past what batch $k was built on: build the batch again" >&2
   exit 21
 fi
 
-landable=$("$here/phase-state" "$doc" | awk -F'\t' -v n="$num" '$1 == n && $2 == "landable" { print $3 }')
+landable=$("$here/phase-state" "$doc" | awk -F'\t' -v k="$k" '$1 == "batch" && $2 == k && $3 == "landable" { print $4 }')
 if [ -z "$landable" ] \
   || [ "$(git -C "$main" rev-parse --verify --quiet "$landable^{commit}" || true)" != "$verified_sha" ]; then
-  echo "phase $num has no passing integration verification of $(git -C "$main" rev-parse --short "$verified_sha") in the ledger: verify it before landing" >&2
+  echo "batch $k has no passing integration verification of $(git -C "$main" rev-parse --short "$verified_sha") in the ledger: verify it before landing" >&2
   exit 22
 fi
 
-before=$(git -C "$main" rev-parse HEAD)
-if ! git -C "$main" merge -q --no-ff "$branch" -m "merge: phase $num — $title" >/dev/null 2>&1; then
-  git -C "$main" merge --abort >/dev/null 2>&1 || git -C "$main" reset -q --hard "$before"
-  echo "merge of '$branch' into '$base' failed; base unchanged" >&2
-  exit 20
-fi
-if [ "$(git -C "$main" rev-parse 'HEAD^{tree}')" != "$(git -C "$main" rev-parse "$verified_sha^{tree}")" ]; then
-  git -C "$main" reset -q --hard "$before"
-  echo "landing phase $num would not reproduce the verified tree; base restored" >&2
-  exit 20
+# Re-run after an interruption, base may already be at the batch tip: the
+# fast-forward is skipped and only what the ledger lacks is recorded.
+if [ "$(git -C "$main" rev-parse HEAD)" != "$verified_sha" ]; then
+  before=$(git -C "$main" rev-parse HEAD)
+  if ! git -C "$main" merge -q --ff-only "$branch" >/dev/null 2>&1; then
+    git -C "$main" reset -q --hard "$before"
+    echo "fast-forward of '$base' to '$branch' failed; base unchanged" >&2
+    exit 20
+  fi
 fi
 
-merged=$(git -C "$main" rev-parse --short HEAD)
-printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
-# Metrics are a record, not a gate: a failure here never fails the landing.
-if metrics=$(cd "$main" && "$here/phase-metrics" "$merged" "$branch" 2>/dev/null); then
-  printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
-fi
-if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
-  echo "note: worktree of phase $num kept — it holds untracked files" >&2
-fi
-echo "phase $num merged to $base ($merged)"
+# The batch's phases, in the order they were merged: each member's
+# 'merge: phase <N> — …' commit on the batch's first-parent line. A member
+# the resolver left out has none.
+members=$("$here/phase-state" "$doc" | awk -F'\t' -v k="$k" '$1 == "batch" && $2 == k { print $5 }' | tr ',' ' ')
+landed=$(git -C "$main" log --first-parent --reverse --format='%h %s' "$verified_sha" \
+  | sed -n 's/^\([0-9a-f][0-9a-f]*\) merge: phase \([0-9][0-9]*\) — .*/\2 \1/p' \
+  | awk -v m=" $members " 'index(m, " " $1 " ") { last[$1] = $2; if (!($1 in seen)) { seen[$1] = 1; order[++n] = $1 } }
+      END { for (i = 1; i <= n; i++) print order[i], last[order[i]] }')
+printf '%s\n' "$landed" | while read -r num merged; do
+  [ -n "$num" ] || continue
+  if grep -q "^phase $num: merged to base (" "$ledger"; then
+    continue
+  fi
+  printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
+  pbranch="phase-$num-$("$here/parse-phases" "$doc" "$num" | cut -f3)"
+  # Metrics are a record, not a gate: a failure here never fails the landing.
+  if metrics=$(cd "$main" && "$here/phase-metrics" "$merged" "$pbranch" 2>/dev/null); then
+    printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
+  fi
+  if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
+    echo "note: worktree of phase $num kept — it holds untracked files" >&2
+  fi
+done
+
+short=$(git -C "$main" rev-parse --short HEAD)
+printf 'batch %s: landed (%s)\n' "$k" "$short" >> "$ledger"
+phases=$(printf '%s\n' "$landed" | cut -d' ' -f1 | { grep . || true; } | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+echo "batch $k landed on $base ($short): phase ${phases:-none}"
+"$here/phase-push" "$doc" "$base" base || true

@@ -31,7 +31,7 @@ assert_contains 'use building-phased-specs-in-parallel' "$(sed -n '3p' "$BUILD/S
 
 for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scripts/parse-deps \
          scripts/phase-state scripts/phase-schedule scripts/phase-overlap scripts/phase-worktree \
-         scripts/phase-integrate scripts/phase-land \
+         scripts/phase-batch scripts/phase-land scripts/phase-push scripts/phase-pr \
          scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
          overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
@@ -43,9 +43,9 @@ for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scri
 done
 assert_eq 'no' "$([ -e "$ROOT/verifier-prompt.md" ] && echo yes || echo no)" \
   'no separate phase verifier template: the integration verifier is the one verification'
-for f in phase-start phase-finish; do
+for f in phase-start phase-finish phase-integrate; do
   assert_eq 'no' "$([ -e "$ROOT/scripts/$f" ] && echo yes || echo no)" \
-    "no $f wrapper: it would switch the main checkout off base"
+    "no $f wrapper: it would switch the main checkout off base, or integrate one phase alone"
 done
 
 # --- invocation, scheduling, integration, ladder, drain ------------------------
@@ -67,20 +67,41 @@ has '.phase-overlap-ignore' 'documents the repository ignore file'
 has 'RUN_DIR/overlap-ignore' 'documents the run ignore file'
 has 'you never read the briefs or' 'the controller never reads the briefs it passes to the judge'
 has 'ORM migration metadata are regenerated' 'integration regenerates generated files and migration metadata'
-has 'phase-integrate' 'integrates through phase-integrate'
+has 'phase-batch' 'integrates through phase-batch'
 has 'phase-land' 'lands through phase-land'
-has 'integration verifier' 'integrated phases are verified'
-has 'verified once, on the integrated tree' 'each phase is verified once, after integration'
-has 'Dispatch the
-  **integration verifier** all the same' 'a ready integration is verified too'
-has 'unverified trees on a base that may be pushed' 'states why landings are not batched under one check'
+has 'integration verifier' 'batches are verified'
+has 'Each batch is verified once, on the combined tree' 'each batch is verified once, on the combined tree'
+has 'takes every queued phase into the next batch' 'the next batch takes every queued phase'
+has 'a lone queued phase goes alone' 'never waits idle for more phases'
+has 'At most one batch is open at' 'one batch at a time, so base cannot move under it'
+has 'pins each failing item on a phase' 'the verifier pins a failure on a phase'
+has 'the rest queue again' 'a pinned failure rebuilds the rest without the culprit'
+has 'verified again without them' 'the rest are verified again before they land'
+has 'flagged `solo`' 'an unpinned failure verifies each phase alone'
+has '`phase-push "$DESIGN_DOC" "$BASE" N`' 'a finished phase branch is pushed as a backup'
+has 'pushes base' 'base is pushed after every landing'
+has 'Never force-push' 'never force-pushes'
+has 'final check' 'runs a final check before the pull request'
+has 'says full
+   suites `all`' 'skips the final check when the last batch ran every full suite'
+has 'abandoned — base moved' 'a batch base moved under is abandoned and rebuilt'
+has 'Take the dispatch values' 'ladder dispatch values are read before the started line'
+has 'pull request is a draft' 'a failed final check still hands off a draft pull request'
+has 'phase-pr' 'opens the pull request through phase-pr'
+has 'PR_TARGET' 'the pull request target is configurable'
+has 'never merges the pull
+request' 'never merges the pull request'
 has 'FULL_SUITE_POLICY' 'the full-suite policy is configurable'
 has '`full suite: once per phase`' 'the owner sets the full-suite policy in the request'
 has 'SHA is the last word' 'PASS lines end in their SHA'
 has 'RESUME_NOTES' 'a lead handed back mid-phase resumes with its worker report'
 has 'wait for that worker' 'never two agents on one task'
-has 'Runs started under the earlier flow' 'finishes ledgers begun under the two-verifier flow'
-has 'both spent on the integrated tree' 'ladder attempts are spent on the combined check'
+has 'Runs started under earlier flows' 'finishes ledgers begun before batching'
+has 'requeued for batching' 'requeues a phase integrated under the per-phase flow'
+has 'followed by verification in a later
+batch' 'every ladder attempt is verified in a later batch'
+has 'no batch is open and
+the phases that shared' 'a ladder attempt waits until its batch mates landed'
 has '**two attempts**' 'two ladder attempts'
 has 'never a third attempt' 'no third attempt'
 has 'straight to rescue' 'an unresolved merge goes to rescue'
@@ -89,14 +110,14 @@ has 'starts and rescouts nothing' 'draining starts nothing new'
 has 'one at a time' 'handles returns one at a time'
 has 'Resume' 'documents resume'
 has 'run: undrained' 'a fixed failure lifts the drain on resume'
-has 'nothing pushed, no PR opened' 'the run ends at a report'
+has 'pull request: <url>' 'the report ends with the pull request'
 has 'significant decisions' 'the report lists significant decisions'
 has 'Known limits' 'states known limits'
 
 # --- the wrappers apply this skill's namespace and the worktree check ------------
 
 repo=$(cd "$(mktemp -d)" && pwd -P)
-trap 'rm -rf "$repo"' EXIT
+trap 'rm -rf "$repo" "$repo.origin"' EXIT
 git -C "$repo" init -q
 git -C "$repo" config user.email test@example.com
 git -C "$repo" config user.name Test
@@ -106,6 +127,11 @@ git -C "$repo" add spec.md
 git -C "$repo" commit -qm initial
 run_in() { set +e; OUT=$(cd "$repo" && "$@" 2>&1); RC=$?; set -e; }
 
+run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
+assert_rc 16 'preflight wrapper: refuses a repository with no origin remote'
+assert_contains 'git remote add origin' "$OUT" 'preflight wrapper: says how to add one'
+git init -q --bare "$repo.origin"
+git -C "$repo" remote add origin "$repo.origin"
 run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
 assert_rc 0 'preflight wrapper: a fresh run passes'
 assert_eq 'yes' "$([ -f "$repo/.superpowers/phase-parallel/spec/run.md" ] && echo yes || echo no)" \

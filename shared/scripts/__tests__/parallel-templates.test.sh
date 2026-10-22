@@ -17,11 +17,12 @@ exists() {
   assert_eq 'yes' "$([ -f "$ROOT/$1" ] && echo yes || echo no)" "$1 exists"
 }
 
-# Templates an agent works in a phase worktree from.
+# Templates an agent works in a phase worktree from, and in the integration
+# worktree batches are built in.
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
-repair-prompt.md rescue-prompt.md resolver-prompt.md
-integration-verifier-prompt.md overlap-judge-prompt.md'
-TEMPLATES="$WORKTREE_TEMPLATES graph-prompt.md"
+repair-prompt.md rescue-prompt.md overlap-judge-prompt.md'
+INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md'
+TEMPLATES="$WORKTREE_TEMPLATES $INTEGRATION_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
 
@@ -102,6 +103,8 @@ has reviewer-prompt.md 'three lines' 'return contract is capped'
 
 exists repair-prompt.md
 has repair-prompt.md 'INTEGRATION_CONTEXT' 'receives the integration context'
+has repair-prompt.md 'Bring BASE in first' 'merges base in before fixing'
+has repair-prompt.md 'The failures pinned on' 'fixes only the failures pinned on its phase'
 has repair-prompt.md 'You get one attempt' 'one attempt'
 has repair-prompt.md 'weakening, skipping, or deleting the check' 'never weakens the check'
 has repair-prompt.md 'six lines' 'return contract is capped'
@@ -115,7 +118,8 @@ has rescue-prompt.md 'RESCUE_REPORT_PATH' 'writes a rescue report'
 has rescue-prompt.md 'CONFLICTS_PATH' 'receives an unresolved conflict'
 has rescue-prompt.md 'There is never a third attempt' 'is the last attempt'
 has rescue-prompt.md 'significant decision' 'every departure is significant'
-has rescue-prompt.md 'git merge --no-ff BASE' 'may redo the integration merge'
+has rescue-prompt.md 'git merge --no-ff BASE' 'merges base in'
+has rescue-prompt.md 'Bring BASE in first' 'merges base in before fixing'
 has rescue-prompt.md 'weakening, skipping, or deleting' 'never weakens the check'
 has rescue-prompt.md 'the most capable model available' 'rescue is most capable'
 has rescue-prompt.md 'FIXED or STILL_BROKEN' 'returns FIXED or STILL_BROKEN'
@@ -131,7 +135,10 @@ has resolver-prompt.md 'Lockfiles are never hand-merged' 'regenerates lockfiles'
 has resolver-prompt.md 'Conflicts are expected here' 'expects conflicts between phases that share files'
 has resolver-prompt.md 'resolve the sources first, then rerun the generator' 'regenerates generated files'
 has resolver-prompt.md "take the
-         base branch's metadata and migrations as they are" 'keeps the base migration metadata'
+         batch side's metadata and migrations as they are" 'keeps the batch side migration metadata'
+has resolver-prompt.md 'BATCH_BRANCH' 'resolves on the batch branch'
+has resolver-prompt.md 'SETUP_MARKER' 'installs dependencies in the shared integration worktree when needed'
+has resolver-prompt.md 'The batch carries on without this phase' 'an unresolvable phase leaves the batch'
 has resolver-prompt.md 'regenerate it with the repository'"'"'s migration generator' 'rebuilds its own migration on top'
 has resolver-prompt.md 'keep every key from both sides' 'merges translation catalogues key by key'
 has rescue-prompt.md 'ORM migration metadata' 'regenerates migration metadata when it redoes the merge'
@@ -160,30 +167,41 @@ assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/overlap-judge-prompt.md" |
 # --- integration-verifier-prompt.md -----------------------------------------
 
 exists integration-verifier-prompt.md
-has integration-verifier-prompt.md 'INTEGRATION_EVIDENCE_PATH' 'writes integration evidence'
+has integration-verifier-prompt.md 'EVIDENCE_PATH' 'writes batch evidence'
+has integration-verifier-prompt.md 'BATCH_PHASES' 'receives every phase in the batch'
+has integration-verifier-prompt.md 'BATCH_BRANCH' 'verifies the batch branch'
 has integration-verifier-prompt.md 'SETUP_COMMAND' 'receives the setup command'
-has integration-verifier-prompt.md 'manifest or lockfile' 're-runs setup when the merge changed dependencies'
+has integration-verifier-prompt.md 'SETUP_MARKER' 'reinstalls only when dependencies changed since the last install'
+has integration-verifier-prompt.md 'manifest or lockfile' 're-runs setup when the batch changed dependencies'
 has integration-verifier-prompt.md 'Report the exit code of every command' 'the exit-code rule'
 has integration-verifier-prompt.md 'looks green and whose exit code is 1 is a FAIL' 'an all-green print with a non-zero exit is a FAIL'
 has integration-verifier-prompt.md 'Acceptance check' 'runs the acceptance check'
+has integration-verifier-prompt.md 'For each phase in BATCH_PHASES' 'checks acceptance for every batch phase'
 has integration-verifier-prompt.md 'met, untested' 'grades untested deliverables'
 has integration-verifier-prompt.md 'decision that removed or replaced it' 'an unexplained missing item fails'
-has integration-verifier-prompt.md 'MERGED_PHASES' 'knows which phases merged into base since the phase began'
-has integration-verifier-prompt.md 'judge them, not those of' 'judges acceptance on this phase alone'
-has integration-verifier-prompt.md 'base never moved' 'verifies a ready integration too'
-has integration-verifier-prompt.md 'no verification of its own' 'handles a phase with no Verification section'
+has integration-verifier-prompt.md 'Judge
+       only the batch' 'judges acceptance on the batch phases alone'
+has integration-verifier-prompt.md 'specified no verification of their own' 'handles a phase with no Verification section'
 has integration-verifier-prompt.md 'test:integration' 'runs a separate integration-test suite'
 has integration-verifier-prompt.md 'end-to-end' 'runs an end-to-end suite'
 has integration-verifier-prompt.md 'A skipped suite never counts' 'a skipped suite is never a pass'
 has integration-verifier-prompt.md 'FULL_SUITE_POLICY' 'takes the full-suite policy'
 has integration-verifier-prompt.md 'once per phase' 'can keep the full suites to one run per phase'
-has integration-verifier-prompt.md 'The scope
-       is narrow' 're-verifies a narrow repair narrowly'
-has integration-verifier-prompt.md 'never overwrite' 'appends to the evidence, so the next verifier reads what ran'
+has integration-verifier-prompt.md 'EARLIER_EVIDENCE' 'reads earlier batches to apply the policy'
+has integration-verifier-prompt.md '### Pinning' 'pins failures on phases'
+has integration-verifier-prompt.md 'git diff --name-only <merge>^1' 'pins a failing test by the files each phase changed'
+has integration-verifier-prompt.md 'the failure is not pinned' 'leaves an ambiguous failure unpinned'
+has integration-verifier-prompt.md 'every failure is pinned on it' 'a batch of one pins on its phase'
+has integration-verifier-prompt.md 'Do not guess' 'never guesses a pin'
+has integration-verifier-prompt.md 'MODE "final"' 'has a final mode for the end of the run'
+has integration-verifier-prompt.md 'every slow full suite whatever' 'the final check runs every full suite'
+has integration-verifier-prompt.md 'never overwrite' 'appends to the evidence, so later verifiers read what ran'
 has integration-verifier-prompt.md "as the line's last word" 'ends its PASS line in the SHA'
+has integration-verifier-prompt.md 'full suites: all' 'reports whether every full suite ran'
+has integration-verifier-prompt.md 'pinned on phase <N>' 'returns the pin'
 has integration-verifier-prompt.md 'Do NOT fix anything' 'the integration verifier does not repair'
 has integration-verifier-prompt.md 'a mid-tier model' 'the integration verifier is mid-tier'
-has integration-verifier-prompt.md 'three lines' 'return contract is capped'
+has integration-verifier-prompt.md 'five lines' 'return contract is capped'
 
 # --- graph-prompt.md -------------------------------------------------------
 
@@ -219,6 +237,12 @@ for t in $WORKTREE_TEMPLATES; do
   has "$t" "Repository: WORKTREE (absolute path of this phase's worktree" 'works in the phase worktree'
   has "$t" 'Do NOT touch the main checkout, the base' 'states the worktree boundary'
   has "$t" 'BASE' 'names the base branch it must not touch'
+done
+
+for t in $INTEGRATION_TEMPLATES; do
+  has "$t" "Repository: WORKTREE (absolute path of the run's integration worktree" 'works in the integration worktree'
+  has "$t" 'Do NOT touch the main checkout, the base' 'states the worktree boundary'
+  has "$t" "any phase's worktree or branch" 'leaves every phase worktree alone'
 done
 
 for t in scout-prompt.md lead-prompt.md worker-prompt.md repair-prompt.md \

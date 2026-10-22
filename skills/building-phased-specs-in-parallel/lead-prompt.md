@@ -60,7 +60,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        and dispatch one worker per group, one after another, in its fix form,
        with REPORT_PATH set to RUN_DIR/phase-PHASE_NUMBER-fix-<G>-report.md.
        That is the whole wave. Do not review again afterwards: a separate
-       verifier checks the branch once it is integrated with the base.
+       verifier checks the phase once it is merged into an integration batch.
     6. Record every decision you made, and the count of deferred findings,
        in DECISIONS_PATH under the decision policy.
 

@@ -5,10 +5,18 @@
 # remembers everything.
 #
 # Prints one action per line, in this order:
-#   land <N> <sha>       an open integration passed its integration
-#                        verifier; land it (phase-land)
-#   integrate <N> <sha>  no integration is open; integrate the queued phase
-#                        that was queued first (phase-state's 'queued')
+#   land <K> <sha>       batch K passed its integration verifier; land it
+#                        (phase-land)
+#   verify <K> <sha>     batch K is built; dispatch the integration verifier
+#   build <K>            batch K is open and not yet built: carry on merging
+#                        its phases (phase-batch build). While a merge waits
+#                        on the resolver, build prints that conflict again
+#   fail <N>             phase N failed again with both ladder attempts used
+#   repair <N> <sha>     phase N's batch failed verification pinned on it:
+#   rescue <N> <sha>     take this ladder attempt on its branch at <sha>
+#   batch <N>@<sha> …    no batch is open: open one with every queued phase,
+#                        in queue order (phase-batch open); a phase flagged
+#                        solo goes alone, earliest first, before any other
 #   rescout <N>          a held phase's blocker has merged (phase-worktree
 #                        refresh, then the scout)
 #   start <N>            every dependency is merged or outside the range
@@ -16,7 +24,11 @@
 #   wait                 something is in flight: wait for the next return
 #   done                 nothing is in flight and nothing can start
 #
-# At most one land or integrate, never while another integration is open.
+# At most one batch is open at a time, so base cannot move under it, and the
+# verifier is never idle while a phase waits: whatever is queued when the
+# last batch closes forms the next one. A ladder attempt starts only while no
+# batch is open and none of the phases that shared the failing batch is still
+# queued, so it works against the base those phases landed on.
 # rescout and start respect CAP, count against it, and are never emitted
 # while the run is draining. Phases are considered in ascending numeric
 # order. A held phase runs no agent and does not count against CAP.
@@ -54,7 +66,14 @@ REQUESTED=$requested STATE=$state CAP=$cap awk -F'\t' '
     for (i = 1; i <= k; i++) {
       split(rows[i], f, "\t")
       if (f[1] == "run") { draining = (f[2] == "draining"); continue }
-      st[f[1]] = f[2]; arg[f[1]] = f[3]; nr[f[1]] = f[4] + 0
+      if (f[1] == "batch") {
+        if (f[3] == "open" || f[3] == "conflict" || f[3] == "built" || f[3] == "landable") {
+          openb = f[2]; openst = f[3]; openarg = f[4]
+        }
+        continue
+      }
+      st[f[1]] = f[2]; arg[f[1]] = f[3]; nr[f[1]] = f[4] + 0; flag[f[1]] = f[6]; bat[f[1]] = f[7]
+      ids[++nids] = f[1]
     }
     cap = ENVIRON["CAP"] + 0
   }
@@ -62,22 +81,58 @@ REQUESTED=$requested STATE=$state CAP=$cap awk -F'\t' '
   # Reading st[n] for a missing n would create it, and then "n in st" would
   # call an unstarted phase started. Every lookup goes through status().
   function status(n) { return (n in st) ? st[n] : "" }
-  function busy(s) { return s == "active" || s == "queued" || s == "integrating" || s == "landable" }
+  function busy(s) { return s == "active" || s == "queued" || s == "batched" || s == "failing" }
   function ready(n,   m, d, j) {
     if (deps[n] == "" || deps[n] == "-") return 1
     m = split(deps[n], d, ",")
     for (j = 1; j <= m; j++) if ((d[j] in want) && status(d[j]) != "merged") return 0
     return 1
   }
-  END {
-    inflight = 0; open = 0; best = ""
-    for (n in st) {
-      if (st[n] == "integrating" || st[n] == "landable") open = 1
-      if (st[n] == "landable") print "land " n " " arg[n]
-      if ((n in want) && busy(st[n])) inflight++
-      if (st[n] == "queued" && (best == "" || nr[n] < nr[best])) best = n
+  # ids holds phases in ascending order; queue order is by ledger line.
+  function byline(list, cnt,   a, b, v) {
+    for (a = 2; a <= cnt; a++) {
+      v = list[a]; b = a - 1
+      while (b >= 1 && nr[list[b]] > nr[v]) { list[b + 1] = list[b]; b-- }
+      list[b + 1] = v
     }
-    if (!open && best != "") print "integrate " best " " arg[best]
+  }
+  END {
+    inflight = 0
+    for (i = 1; i <= nids; i++) {
+      n = ids[i]
+      if ((n in want) && busy(st[n])) inflight++
+    }
+
+    if (openb != "") {
+      if (openst == "landable") print "land " openb " " openarg
+      else if (openst == "built") print "verify " openb " " openarg
+      else print "build " openb
+    }
+
+    nq = 0
+    for (i = 1; i <= nids; i++) {
+      n = ids[i]
+      if (st[n] == "failing" && flag[n] == "exhausted") print "fail " n
+      if (st[n] == "queued") queue[++nq] = n
+    }
+    if (openb == "") {
+      for (i = 1; i <= nids; i++) {
+        n = ids[i]
+        if (st[n] != "failing" || flag[n] == "exhausted") continue
+        mates = 0
+        for (j = 1; j <= nq; j++) if (bat[queue[j]] == bat[n]) mates = 1
+        if (!mates) print flag[n] " " n " " arg[n]
+      }
+      byline(queue, nq)
+      solo = ""
+      for (j = 1; j <= nq; j++) if (flag[queue[j]] == "solo") { solo = queue[j]; break }
+      if (solo != "") print "batch " solo "@" arg[solo]
+      else if (nq > 0) {
+        line = "batch"
+        for (j = 1; j <= nq; j++) line = line " " queue[j] "@" arg[queue[j]]
+        print line
+      }
+    }
 
     if (!draining) {
       for (i = 1; i <= nreq; i++) {

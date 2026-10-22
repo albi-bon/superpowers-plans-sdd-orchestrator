@@ -42,8 +42,10 @@ read their uncommitted work, not to borrow a fix, not to tidy up. Another
 phase's work reaches yours only through the base branch, after it has been
 verified and merged.
 
-You never switch branches, rebase, or push. Only the resolver and the rescue
-agent merge, and only the base branch into their own phase branch.
+You never switch branches, rebase, or push. Only three agents merge: the
+resolver concludes the merge of one phase into an integration batch,
+in the run's integration worktree; the repair and the rescue agent merge the
+base branch into their own phase branch.
 
 A problem that seems to need another phase's code is resolved inside your
 phase under the rules above, and recorded.
