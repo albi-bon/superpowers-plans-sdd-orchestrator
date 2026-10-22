@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Open the pull request that ends a parallel run: base into the target
+# branch, with the run's report as its body. The run never merges it;
+# integration into trunk is a decision for a human.
+#
+# Pushes base first (phase-push) and refuses when that push fails: a pull
+# request for an unpushed base would show stale work. When an open pull
+# request from base already exists — a resumed run — it is reused, not
+# duplicated. TARGET '-' means origin's default branch. 'draft' as a fifth
+# argument opens it as a draft, for a run that did not land every requested
+# phase.
+#
+# Prints 'pr <url>' and appends 'run: PR <url>' to the ledger.
+#
+# Exit codes:
+#   0   opened, or an open one reused
+#   2   usage error, or TARGET is BASE
+#   18  BODY_FILE does not exist
+#   23  pushing base failed
+#   24  gh is unavailable, or origin's default branch could not be found
+#   25  gh pr create failed
+#
+# Usage: phase-pr DESIGN_DOC BASE TARGET|- BODY_FILE [draft]
+set -euo pipefail
+
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ] || { [ "$#" -eq 5 ] && [ "$5" != draft ]; }; then
+  echo "usage: phase-pr DESIGN_DOC BASE TARGET|- BODY_FILE [draft]" >&2
+  exit 2
+fi
+doc=$1
+base=$2
+target=$3
+body=$4
+draft=${5:-}
+
+here=$(cd "$(dirname "$0")" && pwd)
+if [ ! -f "$body" ]; then
+  echo "no body file at $body" >&2
+  exit 18
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh is not installed: push is done; open the pull request by hand" >&2
+  exit 24
+fi
+if [ "$target" = - ]; then
+  target=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+  if [ -z "$target" ]; then
+    target=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || true)
+  fi
+  if [ -z "$target" ]; then
+    echo "could not find origin's default branch: pass the target branch" >&2
+    exit 24
+  fi
+fi
+if [ "$target" = "$base" ]; then
+  echo "the pull request target is the base branch itself: '$base'" >&2
+  exit 2
+fi
+
+ledger="$("$here/phase-run-dir" "$doc")/run.md"
+pushed=$("$here/phase-push" "$doc" "$base" base)
+case "$pushed" in
+  *" failed — "*)
+    echo "$pushed: not opening a pull request for an unpushed base" >&2
+    exit 23
+    ;;
+esac
+
+url=$(gh pr list --head "$base" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
+if [ -z "$url" ]; then
+  title=$(sed -n 's/^# //p' "$doc" | head -n 1)
+  range=$(sed -n '2s/^# base: .*  requested: //p' "$ledger")
+  title="${title:-$(basename "$doc" .md)} — phases ${range:-?}"
+  set -- --base "$target" --head "$base" --title "$title" --body-file "$body"
+  [ -z "$draft" ] || set -- "$@" --draft
+  if ! out=$(gh pr create "$@" 2>&1); then
+    printf '%s\n' "$out" >&2
+    exit 25
+  fi
+  url=$(printf '%s\n' "$out" | grep -E '^https?://' | tail -n 1)
+  url=${url:-$(printf '%s\n' "$out" | tail -n 1)}
+fi
+printf 'run: PR %s\n' "$url" >> "$ledger"
+echo "pr $url"

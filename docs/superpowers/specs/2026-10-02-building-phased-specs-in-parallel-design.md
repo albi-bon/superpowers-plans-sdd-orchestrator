@@ -35,13 +35,17 @@ controller — and adds:
    back when its scout finds it needs something an in-flight phase is building, or when
    an overlap judge finds it and an in-flight phase both making major changes to the
    same domain. Shared files alone only send the phase to the judge;
-4. an **integration step** that merges the moved base into a built phase branch,
-   resolves textual conflicts with a resolver agent, verifies the integrated result once
-   — gates and acceptance check — and only then lands the phase on base, so base only
-   ever holds verified trees;
+4. **batch integration**: built phases queue, and whenever the verifier is free every
+   queued phase is merged onto one batch branch off base, textual conflicts are resolved
+   by a resolver agent, the combined tree is verified once — gates, acceptance check,
+   and a pin on the phase behind any failure — and only then lands on base, so base
+   only ever holds verified trees (amended, §3.6);
 5. an **escalation ladder** — repair, then rescue — before a failing phase stops the
    run, and a **drain** instead of an immediate halt: nothing new starts, in-flight
-   phases finish and land, then the run stops.
+   phases finish and land, then the run stops;
+6. **pushes and a pull request** (amended, §3.9): each finished phase branch and every
+   landed base is pushed to `origin`, and the run ends by opening a pull request from
+   base, after a final full-suite check when the last batch did not run every suite.
 
 It runs unattended, like `building-phased-specs`. Nobody is asked anything after
 preflight.
@@ -55,7 +59,9 @@ preflight.
 - The `building-phased-specs-in-parallel` skill: `SKILL.md`, dispatch templates, policy
   files, platform guide, wrapper scripts.
 - New shared scripts: `parse-deps`, `phase-state`, `phase-schedule`, `phase-overlap`,
-  `phase-worktree`, `phase-integrate`, `phase-land` (§4).
+  `phase-worktree`, `phase-batch`, `phase-land`, `phase-push`, `phase-pr` (§4). The
+  original `phase-integrate`, which merged base into one phase, was removed when batch
+  integration replaced it.
 - A run-directory namespace, `phase-parallel`, so this skill never shares a ledger with
   the other three.
 - `install.sh` learns the `parallel` skill argument.
@@ -72,8 +78,9 @@ preflight.
   shared files, judged by the overlap judge, plus the scout's judgement (§3.4). Coupling
   through unchanged files is caught by the integration gates, not predicted.
 - **Retrying a drained run automatically.** Re-invoking is the retry (§4.8).
-- Everything `building-phased-specs` already excludes: pushing, PRs, trunk merges,
-  per-repository configuration, authoring the design document.
+- Everything `building-phased-specs` already excludes except pushing and opening a PR
+  (§3.9): merging into trunk, per-repository configuration, authoring the design
+  document.
 
 ---
 
@@ -90,17 +97,22 @@ inside that worktree.
 preflight                                    (shared checks + worktree checks)
 graph:  parse-deps → graph.tsv               (graph agent if the doc has no Depends on lines)
 loop until phase-schedule reports nothing running and nothing to do:
-    phase-schedule → actions: start N | rescout N | integrate N | wait | done
+    phase-schedule → actions: land K | verify K | build K | fail N | repair N | rescue N
+                              | batch N@sha … | rescout N | start N | wait | done
       start N      → phase-worktree start N → ① scout
       rescout N    → phase-worktree refresh N → ① scout
-      integrate N  → phase-integrate N (§3.6)
-    when any agent returns, advance its phase:
+      batch …      → phase-batch open (§3.6)
+      build K      → phase-batch build K
+      verify K     → integration verifier on batch K
+      land K       → phase-land K (pushes base)
+      repair/rescue N → ladder (§3.7)
+    when any agent returns, advance its phase or batch:
       ① scout done   → phase-overlap N  → clear: ② phase lead │ prereq: held
                                            │ overlap: judge → run: ② │ hold: held
-      ② lead DONE    → queued for integration
+      ② lead DONE    → queued; phase-push N
       resolver / integration verifier → §3.6
-      integration verifier FAIL       → ladder (§3.7)
-report
+final check (unless the last batch ran every full suite), report, phase-pr (§3.9; draft
+when a phase did not land or the final check failed)
 ```
 
 Agents are dispatched in the background; the controller waits for completion
@@ -119,14 +131,16 @@ main session (controller)
 │  │  ├─ Agent: reviewer         once
 │  │  └─ Agent: fix worker       one per finding group, at most one wave
 │  ├─ Agent: repair              ladder attempt 1
-│  ├─ Agent: rescue              ladder attempt 2
-│  ├─ Agent: resolver            only on a textual conflict at integration
-│  └─ Agent: integration verifier  the phase's one verification
+│  └─ Agent: rescue              ladder attempt 2
+├─ for the open batch (one at a time):
+│  ├─ Agent: resolver            only on a textual conflict merging a phase in
+│  └─ Agent: integration verifier  the batch's one verification; also the final check
 ```
 
 Three agent levels, as in `building-phased-specs`. Only the phase lead nests. At most
-one agent runs per phase at the controller level, plus the lead's one worker, so the
-host must allow `1 + 2 × CAP` concurrent agents.
+one agent runs per phase at the controller level, plus the lead's one worker; the open
+batch adds one, for phases that count against the cap and run nothing themselves, so
+the host must allow `1 + 2 × CAP` concurrent agents.
 
 ### 3.3 Models
 
@@ -224,62 +238,87 @@ On resume the existing `graph.tsv` is reused, never regenerated.
 
 ### 3.6 Integration
 
-The controller integrates **one phase at a time**, in the order their leads returned
-`DONE`. Other phases keep building meanwhile. Base moves only through
-`phase-land`, which the controller never runs while another integration is open, so an
-integrated SHA cannot go stale during its own integration.
+Amended (batch integration). The original design integrated **one phase at a time**:
+base was merged into the phase branch in its worktree, the integrated phase was
+verified, and it landed, before the next queued phase began. When several phases
+finished during one verification, each then paid for its own run of the slow suites.
+They are now integrated in batches.
 
-1. `phase-integrate N SHA`, in the phase's worktree, with the SHA the scheduler queued:
-   - refuses a dirty worktree, or a branch HEAD other than `SHA`;
-   - base tip already an ancestor of HEAD — base never moved since the fork: prints
-     `ready <sha>`, go to step 3;
-   - otherwise runs `git merge --no-ff BASE -m "integrate: base into phase <N>"`:
-     - clean: prints `merged <sha>`; go to step 3;
-     - conflict: leaves the merge in progress, writes the conflicted paths and the
-       phases merged into base since the fork (read from `merge: phase <M> — …` commit
-       subjects) to `<run-dir>/phase-<N>-conflicts.md`, prints `conflict`; go to step 2.
-2. **Resolver.** Works in the worktree with the merge in progress. Reads the conflicts
-   file, phase N's brief and decisions, and each listed phase M's brief and decisions.
-   Keeps the behaviour of both sides. Regenerates lockfiles with the repository's
-   package manager. Runs fast checks on the touched files. Commits the merge. Records
-   decisions in phase N's decisions file — significant when either phase's behaviour
-   changed. Returns `RESOLVED <sha>`, or `UNRESOLVED` after running `git merge --abort`,
-   which puts the worktree back at the queued SHA.
-3. **Integration verifier**, on every outcome, `ready` included: the phase's only
-   verification. Every gate the repository has — typecheck, lint, the root test suite,
-   a separate integration suite needing a database or Docker, an end-to-end suite when
-   its infrastructure can be started, build — and the acceptance check on this phase's
-   deliverables, told which phases merged into base since it began. If the merge
-   changed a manifest or lockfile, it runs the setup first. It appends to
-   `phase-<N>-integration-evidence.md`; a re-verification after a narrow repair re-runs
-   only the affected suites and acceptance items, and the owner's `full suite: once per
-   phase` keeps the slow full suites to one run per phase. `PASS <sha>` → step 4.
-   `FAIL` → ladder (§3.7), with the conflicts file and merged phases' briefs in the
-   attempt's context.
+**Queue and batch.** A phase whose lead returned `DONE` queues. While a batch is being
+built or verified, phases that finish queue up. When no batch is open, `phase-schedule`
+emits `batch` with every queued phase, in queue order. It never waits for more phases:
+a lone queued phase goes alone. At most one batch is open, and base moves only when a
+batch lands, so base cannot move under a batch. Other phases keep building meanwhile.
 
-   Amended after a live run: the original design verified each phase twice, gates and
-   acceptance on the phase branch, then gates again after the merge. With base moving
-   under most phases, the slow suites ran twice per phase. One verification on the
-   integrated tree keeps the acceptance check, which in that run was the only thing to
-   catch a real bug. Landing several phases under one shared check was rejected: it
-   puts unverified trees on base and blurs which phase failed.
-4. `phase-land N SHA`, in the main checkout (§4.6). Base fast-forwards in content to
-   exactly the verified tree, with a `--no-ff` merge commit for history.
+1. `phase-batch open N@SHA …` checks each phase branch is at its queued SHA, records
+   `batch <K>: opened — phases <N>@<sha> …`, and creates `phase-batch-<K>` at the base
+   tip in one integration worktree, `<repo>/.worktrees/integration`, reused by every
+   batch so its installed dependencies carry over. It merges the phases onto the batch
+   branch one after another, each with `git merge --no-ff <sha> -m "merge: phase <N> —
+   <title>"` — the subject base's history has always used, so a landed batch reads on
+   base exactly like phases landed one by one. It prints:
+   - `built K <sha>`: every phase is in; go to step 3;
+   - `conflict K N M,…`: the merge of phase N is left in progress; the conflicted paths
+     and the phases on the other side (merged into base since N forked, then earlier
+     in the batch) are in `<run-dir>/phase-<N>-conflicts.md`; go to step 2;
+   - `empty K`: every phase left the batch.
+2. **Resolver.** Works in the integration worktree with the merge in progress. Reads the
+   conflicts file, phase N's brief and decisions, and each other-side phase's brief and
+   decisions. Keeps the behaviour of both sides. Regenerates lockfiles, generated files
+   and migration metadata with the repository's own commands. Runs fast checks on the
+   touched files. Commits the merge. Records decisions in phase N's decisions file.
+   Returns `RESOLVED <sha>` — `phase-batch build K` carries on — or `UNRESOLVED` after
+   `git merge --abort`: phase N leaves the batch, which carries on without it, and goes
+   to the rescue once the batch closes (§3.7).
+3. **Integration verifier**, once per batch: every gate the repository has — typecheck,
+   lint, the root test suite, a separate integration suite needing a database or
+   Docker, an end-to-end suite when its infrastructure can be started, build — and the
+   acceptance check on every batch phase's deliverables. It reinstalls dependencies
+   only when a manifest or lockfile changed since the integration worktree's last
+   install. `full suite: once per phase` skips a slow suite every batch phase already
+   had run in an earlier batch. On a failure it **pins** each failing item on a phase:
+   a missing acceptance item on its phase; a failing test or check on the phase whose
+   merge commit changed the files the failure points at, when exactly one batch phase
+   did. In a batch of one, every failure is pinned on it. It appends to
+   `batch-<K>-evidence.md` and returns PASS or FAIL with the SHA, whether every full
+   suite ran, and the pin.
+4. **PASS** → `phase-land K SHA` fast-forwards base to the batch tip (§4.6) and pushes
+   base. **FAIL, pinned** → the pinned phases go to the ladder; the batch's other phases
+   queue again and form the next batch, verified again without them, so base never
+   holds a tree that was not itself verified. **FAIL, not pinned** → every phase of the
+   batch queues again flagged `solo` and is verified alone, earliest first; the one
+   that fails alone is pinned by definition. A phase requeued after a repair that
+   returned `STILL_BROKEN`, or by an owner fix on resume, is also verified alone, so it
+   cannot fail a batch. A failed batch with one phase left in it is pinned on that
+   phase whatever the verdict, so a solo batch can never loop.
+5. A script refusal on a built or passed batch — base moved under it, the batch branch
+   moved — records `batch <K>: abandoned — <reason>`; its phases queue again, unflagged.
+   `phase-batch` discards tracked changes a verifier left in the integration worktree,
+   and aborts a merge of its own it never recorded, so a crash there cannot wedge the
+   run. `phase-land` re-run after an interrupted landing finishes recording it.
+
+The original design rejected landing several phases under one shared check because it
+"puts unverified trees on base and blurs which phase failed". Batch integration keeps
+both properties: a batch lands only on its own PASS, a failure is pinned before anything
+lands, and an unclear failure splits the batch rather than guessing.
 
 ### 3.7 The escalation ladder
 
-Every phase has a budget of **two attempts**, each followed by the integration verifier
-again.
+Every phase has a budget of **two attempts**, each followed by verification in a later
+batch. Both repair and rescue first merge the current base into the phase branch, so
+they work on the tree the phase will next be verified on; an attempt starts only when no
+batch is open and the phases that shared the failing batch have landed or moved on.
 
 | Attempt | Agent | Mandate |
 |---|---|---|
 | 1 | **repair** | Scoped fix of what the evidence names. Never weakens, skips or deletes the check that caught it. |
 | 2 | **rescue** | Fresh eyes with a wider mandate: reads both evidence files, the repair's report, the brief and decisions. May change approach, rework a task, re-scope against the current base, build a missing prerequisite, or redo the integration merge. Every departure from the brief is significant. |
 
-- Integration-verify FAIL → repair → integration verify → rescue → integration verify
-  → drain.
+- Batch FAIL pinned on the phase → repair → requeued, verified in a later batch →
+  rescue → requeued, verified → drain.
 - Resolver `UNRESOLVED` → rescue directly, if unused. A repair is a scoped fix and an
-  unresolved merge is not one. Rescue redoes the integration merge itself.
+  unresolved merge is not one. The rescue merges base, which by then holds the phases
+  it clashed with, and resolves the conflicts itself.
 - Budget spent and still failing → the phase is **failed** and the run **drains**.
 
 The ledger records each start before the dispatch:
@@ -296,11 +335,30 @@ Drain triggers:
 
 - a phase's ladder is exhausted;
 - `BLOCKED` from a scout, phase lead, resolver or rescue (the decision policy's list);
-- a non-zero exit from `phase-worktree`, `phase-integrate` or `phase-land`.
+- a non-zero exit from `phase-worktree`, `phase-batch` or `phase-land`.
 
 The controller appends `run: draining — phase <N> <reason>` before anything else.
 
 A preflight refusal stops the run before anything starts, as today.
+
+### 3.9 Pushing and the pull request
+
+Added with batch integration.
+
+- When a phase lead returns `DONE`, and when a repaired phase is requeued, `phase-push`
+  pushes its branch to `origin` as a backup.
+- `phase-land` pushes base after every landed batch.
+- A failed push is recorded (`push: <branch> failed — …`) and never fails a phase; the
+  next push of that branch retries. Nothing is ever force-pushed.
+- On `done`: a **final check** — the integration verifier in `final` mode on the base
+  tip, every gate and every slow suite, no acceptance check — unless the last landed
+  batch already ran every full suite on exactly that tree. Then the report, then
+  `phase-pr`, which pushes base and opens a pull request from base into `PR_TARGET`
+  (`pr into <branch>` in the invocation, otherwise origin's default branch) with the
+  report as its body. It is a draft when a requested phase did not land or the final
+  check failed; the report names the failure. An open pull request from base is reused
+  on resume. The run never merges it.
+- Preflight refuses a repository with no `origin` remote.
 
 ---
 
@@ -315,10 +373,14 @@ A preflight refusal stops the run before anything starts, as today.
 | Graph | `<run-dir>/graph.tsv` |
 | Brief, decisions, task/fix reports, review, evidence | as in `building-phased-specs` |
 | Conflicts | `<run-dir>/phase-<N>-conflicts.md` |
-| Integration evidence | `<run-dir>/phase-<N>-integration-evidence.md` |
+| Batch evidence | `<run-dir>/batch-<K>-evidence.md`; the final check's is `final-evidence.md` |
+| Integration setup marker | `<run-dir>/integration-setup` |
+| Report (PR body) | `<run-dir>/report.md` |
 | Rescue report | `<run-dir>/phase-<N>-rescue-report.md` |
 | Worktree | `<repo>/.worktrees/phase-<N>-<slug>/` |
 | Phase branch | `phase-<N>-<slug>` |
+| Integration worktree | `<repo>/.worktrees/integration/` |
+| Batch branch | `phase-batch-<K>` |
 
 The run directory lives in the main checkout. Agents in worktrees reach it by absolute
 path; worktrees hold code only.
@@ -344,10 +406,10 @@ The building skill's templates are copied into the new skill directory and chang
 |---|---|
 | `scout-prompt.md` | `REPO_ROOT` becomes `WORKTREE`. Runs setup (§4.2). Reads the decisions files of phases already merged to base — their code is what it grounds against — and never those of in-flight phases. Receives `IN_FLIGHT_PHASES`. Return gains `prereq-inflight: phase <M>` or `prereq-inflight: none`. |
 | `lead-prompt.md`, `worker-prompt.md`, `reviewer-prompt.md` | `REPO_ROOT` becomes `WORKTREE`. Each states: never touch the main checkout, `BASE`, or another phase's worktree or branch. |
-| `repair-prompt.md` | Optional integration context: the conflicts file and merged phases' briefs and decisions. |
-| `rescue-prompt.md` (new) | §3.7. The one agent besides the resolver allowed to run `git merge BASE` in its worktree, and only to redo an integration. Return: `FIXED` or `STILL_BROKEN`, root cause, commands re-run with exit codes, commit SHAs, significant count. |
-| `resolver-prompt.md` (new) | §3.6 step 2. Return: `RESOLVED <sha>` or `UNRESOLVED`, conflicted file count, significant count. |
-| `integration-verifier-prompt.md` (new) | §3.6 step 3; absorbs `verifier-prompt.md`'s acceptance check, which has no separate template here. Return: `PASS` or `FAIL` plus SHA, one-line reason, evidence path. |
+| `repair-prompt.md` | Merges base into its phase branch first, then fixes the failures the batch evidence pins on its phase. Optional integration context: the briefs and decisions of the phases batched beside it. |
+| `rescue-prompt.md` (new) | §3.7. Like the repair, merges base into its phase branch, here with a wider mandate. Return: `FIXED` or `STILL_BROKEN`, root cause, commands re-run with exit codes, commit SHAs, significant count. |
+| `resolver-prompt.md` (new) | §3.6 step 2, in the integration worktree. Return: `RESOLVED <sha>` or `UNRESOLVED`, conflicted file count, significant count. |
+| `integration-verifier-prompt.md` (new) | §3.6 step 3; absorbs `verifier-prompt.md`'s acceptance check, which has no separate template here. Pins failures; has a `final` mode. Return: `PASS` or `FAIL` plus SHA, full suites run, pin, one-line reason, evidence path. |
 | `graph-prompt.md` (new) | §3.5. Writes `graph.tsv`. Return: path, phase count, edge count. Edits nothing else. |
 | `decision-policy.md` | Adds the worktree boundary rule. `BLOCKED` list unchanged. |
 | `testing-policy.md` | Unchanged. |
@@ -372,12 +434,20 @@ phase 2: grounded — brief phase-2-brief.md, 6 tasks, 3 drift, 1 significant
 phase 4: held — waits on phase 3 (domain: both reshape the session store)
 phase 3: merged to base (4c5d6e7)
 phase 4: released — phase 3 merged
-phase 5: integrating — base moved (phase 4), clean merge 1a2b3c4
-phase 5: conflict — 3 files vs phase 4, resolver dispatched
+push: phase-5-billing at 1f2e3d4
+batch 3: opened — phases 4@0a1b2c3 5@1f2e3d4
+phase 4: batched — batch 3, clean merge 1a2b3c4
+phase 5: batched — batch 3, conflict in 3 files
 phase 5: resolved 5d6e7f8
-phase 5: integration verified PASS 5d6e7f8
-phase 5: merged to base (9a0b1c2)
+batch 3: built 5d6e7f8
+batch 3: verified PASS — full suites all — 5d6e7f8
+phase 4: merged to base (1a2b3c4)
+phase 5: merged to base (5d6e7f8)
+batch 3: landed (5d6e7f8)
+push: feat/thing at 5d6e7f8
 run: draining — phase 6 ladder exhausted
+run: final check skipped — batch 3 ran every full suite
+run: PR https://github.com/acme/app/pull/42
 ```
 
 The controller appends `phase <N>: <role> dispatched` before every dispatch. With
@@ -398,54 +468,56 @@ A failed phase is recorded as `phase <N>: failed — <reason>` before the run's
 |---|---|
 | `start N` | Refuses a phase the ledger records as merged. Branch absent: `git worktree add -b phase-<N>-<slug> <path> BASE`, appends `started`. Branch present and the ledger accounts for it: re-attaches it (`git worktree add <path> <branch>`), after `git worktree prune` if a stale entry exists. Branch present and unknown to the ledger: refuses. Prints the worktree path. Idempotent. |
 | `refresh N` | Refuses if the branch has commits beyond its fork point. Fast-forwards the branch to `BASE`. Appends `released`. |
-| `check` | Lists every phase worktree of this run and refuses (non-zero, names the path) when any is dirty or has a merge in progress that the ledger does not account for. |
+| `check` | Refuses (non-zero, names the path) when any phase worktree of this run is dirty, or when the integration worktree has uncommitted changes to tracked files other than a resolver's merge in progress for the open batch. |
 | `remove N` | `git worktree remove` for a landed phase. Keeps the branch. |
 | `path N` | Prints the worktree path. |
 
 ### 4.6 `phase-land`
 
-`phase-land DESIGN_DOC BASE N VERIFIED_SHA`, run in the main checkout on `BASE`:
+Amended (batch integration). `phase-land DESIGN_DOC BASE K VERIFIED_SHA`, run in the main
+checkout on `BASE`:
 
 1. Refuses a dirty main checkout.
-2. Refuses if the phase branch HEAD is not `VERIFIED_SHA`.
-3. Refuses if the base tip is not an ancestor of `VERIFIED_SHA` — base moved and the
-   phase needs integrating again.
-3a. Refuses unless `phase-state` reports the phase `landable` at `VERIFIED_SHA`: an
-   `integration verified PASS` for that commit (or, in a ledger from the original
-   two-verifier flow, a `ready` integration after a phase-verifier pass).
-4. `git merge --no-ff phase-<N>-<slug> -m "merge: phase <N> — <title>"`.
-5. Asserts the merge commit's tree equals `VERIFIED_SHA`'s tree. On a mismatch, or any
-   merge failure: `git merge --abort` or `git reset --hard ORIG_HEAD` back to the
-   pre-merge base tip, exit non-zero, base unchanged.
-6. Appends `phase <N>: merged to base (<sha>)`, removes the worktree, prints one line.
+2. Refuses if the batch branch `phase-batch-<K>` is not at `VERIFIED_SHA`.
+3. Refuses if the base tip is not an ancestor of `VERIFIED_SHA`.
+4. Refuses unless `phase-state` reports batch K `landable` at `VERIFIED_SHA`: a
+   `batch <K>: verified PASS … — <sha>` line for that commit.
+5. `git merge --ff-only phase-batch-<K>`: base ends at exactly the verified commit.
+6. For every `merge: phase <N> — …` commit brought in, appends
+   `phase <N>: merged to base (<sha>)` and a metrics line, and removes that phase's
+   worktree, keeping its branch. Appends `batch <K>: landed (<sha>)`, then pushes base.
 
 Failed and drained phases keep their worktrees for inspection.
 
-### 4.7 `phase-schedule`, `phase-overlap`, `phase-integrate`
+### 4.7 The scheduling and integration scripts
 
 `phase-state DESIGN_DOC` reads the ledger and prints each started phase's status —
-`active`, `held`, `queued`, `integrating`, `landable`, `merged` or `failed`, with
-ladder attempts used — and whether the run is draining. An `executed` line queues a
-phase; so does a `verified PASS` line from the original flow, after which a `ready`
-integration stays landable, so a ledger begun under that flow keeps its meaning. `phase-schedule` and `phase-overlap` both read the ledger
-through it, so they cannot disagree.
+`active`, `held`, `queued`, `batched`, `failing`, `merged` or `failed`, with ladder
+attempts used, a flag (`solo` for a queued phase, the next ladder step for a failing
+one) and its batch — then each batch's status: `open`, `conflict`, `built`,
+`landable`, `landed`, `failed` or `empty`, with its members and whether every full
+suite ran. An `executed` line queues a phase; so does a `verified PASS` line from the
+original flow. `phase-schedule`, `phase-overlap`, `phase-batch`, `phase-land` and
+`phase-worktree check` all read the ledger through it, so they cannot disagree.
 
 `phase-schedule DESIGN_DOC BASE RANGE CAP` reads `graph.tsv` and `phase-state` and
-prints one action per line: `land <N> <sha>`, `integrate <N> <sha>`, `rescout <N>`,
-`start <N>`, then `wait` if anything is in flight, or `done` if nothing is. It never
-mutates anything. It emits at most one `land` or `integrate`, and no `integrate` while
-an integration is open (an `integrating` line with no later `merged` or `failed`
-line). The controller dispatches every action that is
-not already running per its `dispatched` lines, then waits for the next return.
+prints one action per line: `land <K> <sha>`, `verify <K> <sha>`, `build <K>`,
+`fail <N>`, `repair <N> <sha>`, `rescue <N> <sha>`, `batch <N>@<sha> …`,
+`rescout <N>`, `start <N>`, then `wait` if anything is in flight, or `done` if nothing
+is. It never mutates anything.
 
 `phase-overlap DESIGN_DOC BASE N [PREREQ_PHASE]` implements §3.4. It takes the scout's
 `prereq-inflight` value as its optional argument, so both signals are decided and
 recorded in one place. Prints `clear`, `held <M> prereq-inflight`, or
 `overlap <M>[,<M>…] <paths>` for the overlap judge.
 
-`phase-integrate DESIGN_DOC BASE N SHA` implements §3.6 step 1. Appends the
-`integrating` or `conflict` line. Idempotent: re-run after an interruption, it detects a
-merge in progress (prints `conflict`) or base already in HEAD (prints `ready`).
+`phase-batch DESIGN_DOC BASE open N@SHA … | build K | final` implements §3.6 steps 1–2
+and puts the integration worktree on the base tip for the final check. Idempotent: re-run
+after an interruption, a merge in progress prints the same `conflict` line, and a phase
+already in the batch branch is skipped.
+
+`phase-push DESIGN_DOC BASE N|base` and `phase-pr DESIGN_DOC BASE TARGET|- BODY [draft]`
+implement §3.9.
 
 All new scripts follow the shared portability rules: bash 3.2, BSD `awk` and `sed`, no
 `\s`, no interval expressions, no bracket expressions over multibyte dashes.
@@ -461,10 +533,10 @@ another spec or base, as today, and additionally runs `phase-worktree check`.
   existing brief; the lead resumes from ticked tasks; the resolver continues a merge in
   progress.
 - A started phase whose worktree directory is gone: `phase-worktree start` re-attaches.
-- An integration with no outcome line: `phase-integrate` again; it is idempotent.
+- An open batch with no outcome line: `phase-batch build` again; it is idempotent.
 - Ladder attempts already started stay consumed.
 - `run: draining` recorded: the failed phase is requeued at its HEAD first, in case the
-  owner fixed it by hand, and integrated and verified again. `PASS` appends `run: undrained — phase <N> verified PASS` and normal
+  owner fixed it by hand, and batched alone and verified again. `PASS` appends `run: undrained — phase <N> verified PASS` and normal
   scheduling resumes; `FAIL` drains again without a new attempt.
 - A dirty main checkout or a dirty phase worktree fails preflight and is named. Never
   stash, discard or commit an interrupted agent's changes.
@@ -475,13 +547,15 @@ another spec or base, as today, and additionally runs `phase-worktree check`.
 RUN COMPLETE — phases 2–6 of …-design.md
 graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)   cap 3
 
-phase 2  merged  a1b2c3d..4c5d6e7  review 0/2/5  2 fixed  5 deferred  integration: none needed
-phase 3  merged  …                 review 1/1/2  …                    integration: conflict vs 4, resolved  (repair)
-phase 4  merged  …                 held on 3 (domain: both reshape the session store)     integration: clean
+phase 2  merged  a1b2c3d..4c5d6e7  review 0/2/5  2 fixed  5 deferred  batch 1 (alone)
+phase 3  merged  …                 review 1/1/2  batch 2 failed on 4, landed in batch 3
+phase 4  merged  …                 held on 3 (domain: both reshape the session store)  verified after repair
 phase 5  FAILED  ladder exhausted — evidence …, worktree .worktrees/phase-5-…
 phase 6  not started (depends on 5)
 
-base feat/thing ready — nothing pushed, no PR opened
+batches: 5 built, 4 landed, 1 failed (pinned)
+final check: skipped — batch 4 ran every full suite
+base feat/thing pushed at 7a8b9c0
 
 significant decisions (audit these):
   graph: <line, when the graph agent built it>
@@ -489,6 +563,7 @@ significant decisions (audit these):
   …
 
 run directory: <run-dir>
+pull request: <url> (draft: phase 5 did not land)
 ```
 
 ### 4.10 Invoking the right skill
@@ -508,7 +583,8 @@ run directory: <run-dir>
 ```
 shared/scripts/
   parse-phases  phase-run-dir  phase-preflight  phase-start  phase-finish
-  parse-deps  phase-schedule  phase-overlap  phase-worktree  phase-integrate  phase-land
+  parse-deps  phase-state  phase-schedule  phase-overlap  phase-worktree  phase-batch
+  phase-land  phase-push  phase-pr
   __tests__/
 skills/building-phased-specs-in-parallel/
   SKILL.md
@@ -517,11 +593,13 @@ skills/building-phased-specs-in-parallel/
   integration-verifier-prompt.md  graph-prompt.md
   testing-policy.md  decision-policy.md  platform-guide.md
   scripts/   thin wrappers, namespace phase-parallel:
-             parse-phases  phase-run-dir  phase-preflight  parse-deps  phase-schedule
-             phase-overlap  phase-worktree  phase-integrate  phase-land
+             parse-phases  phase-run-dir  phase-preflight  parse-deps  phase-state
+             phase-schedule  phase-overlap  phase-worktree  phase-batch  phase-land
+             phase-push  phase-pr
 ```
 
-The wrapper `phase-preflight` runs the shared preflight, then `phase-worktree check`.
+The wrapper `phase-preflight` refuses a repository with no `origin` remote, runs the
+shared preflight, then `phase-worktree check`.
 Every other wrapper is the existing three-line shape. The skill has no `phase-start` or
 `phase-finish` wrapper: both switch branches in the main checkout, which this skill
 never does.
@@ -547,6 +625,10 @@ never does.
 | **D13** | **Scheduling decisions live in a script, `phase-schedule`, that reads only the ledger and graph.** | With several agents in flight, a compacted controller is more likely to lose its place. A pure function of on-disk state cannot. |
 | **D14** | **Lockfiles are excluded from the overlap check and regenerated at integration.** | Almost every phase touches them; counting them would serialise every run. They are generated artifacts, not hand-written code. |
 | **D15** | **File overlap is a signal; an overlap judge decides.** Amends D4. Translation catalogues, generated files, docs and rules, migration metadata and tests are excluded like lockfiles; owners add patterns per repository. | Owner's call, from a live run in a monorepo: nearly every phase shared some file and the file-level check serialised the run. Conflicts are integration's job; what must be avoided is two phases making major changes to the same domain. |
+| **D16** | **Batch integration.** Amends D7 and D9. Every phase queued while a verification runs is merged onto one batch branch off base and verified together, once; a lone queued phase goes alone. | Owner's call. Phases often finish during one verification, and each then paid for its own run of the slow suites. One batch at a time keeps D9's guarantee that base cannot move under an integration. |
+| **D17** | **A batch failure is pinned on a phase; the rest are rebuilt and verified again without it.** An unpinned failure verifies each phase alone. | Owner's call, over landing the rest unverified. Base only ever holds a tree a verifier passed; a wrong guess would land the broken phase. |
+| **D18** | **Repair and rescue merge base into their phase branch and start only after the failing batch's other phases land.** | The attempt then fixes the tree the phase will next be verified on, including the phases it failed beside. Replaces integrating each phase alone before its verification. |
+| **D19** | **The run pushes and opens a pull request.** Amends the carried-over "no push, no PR". Phase branches are pushed when built, base after every landing; a final full-suite check runs unless the last batch already ran every suite on that tree; the pull request is a draft when a requested phase did not land, and is never merged. | Owner's call. Pushes back up unattended work as it lands; the pull request is the hand-off to a human. |
 
 ---
 
@@ -690,7 +772,8 @@ These hold unchanged; see `2026-09-22-building-phased-specs-design.md`.
   check — per phase, unchanged in substance.
 - Task tiers as the scout assigns them.
 - Decision policy, `BLOCKED` list, testing policy.
-- Base must not be trunk. The run ends at a report: no push, no PR, no trunk merge.
+- Base must not be trunk. No trunk merge. (Pushing and the pull request are added
+  here, D19.)
 - Phase identity is the heading number, never a position.
 - Script portability rules.
 
@@ -717,6 +800,12 @@ Stated in `SKILL.md`, not only here.
    excluded.
 6. **One review per phase; the brief is a convention; permissions and nesting depth are
    host-controlled** — as in `building-phased-specs`.
+7. **A failed batch costs more verifications**: a pinned failure re-verifies the rest,
+   an unpinned one verifies each phase alone, and a rebuilt batch resolves its merge
+   conflicts again. A pin by files can miss a phase that breaks another through
+   behaviour; the failure is then unpinned and the batch split.
+8. **The run pushes** phase branches and base to `origin` as it goes, and opens a pull
+   request at the end. It never merges into the target.
 
 ---
 

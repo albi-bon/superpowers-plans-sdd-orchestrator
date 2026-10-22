@@ -1,51 +1,63 @@
 #!/usr/bin/env bash
-# Read a parallel run's ledger and print where every started phase stands.
-# phase-schedule and phase-overlap both call this, so the two can never
-# disagree about which phases are in flight, held, waiting or done.
+# Read a parallel run's ledger and print where every started phase and every
+# integration batch stands. phase-schedule, phase-overlap, phase-batch,
+# phase-land and phase-worktree all call this, so they can never disagree
+# about which phases are in flight, batched, failing or done.
 #
 # Output: one 'run' line, then one line per phase that has a ledger line,
-# ascending by number:
+# ascending by number, then one line per batch, ascending:
 #
 #   run<TAB>draining|normal
-#   <N><TAB><status><TAB><arg><TAB><ledger line number><TAB><attempts used>
+#   <N><TAB><status><TAB><arg><TAB><line><TAB><attempts><TAB><flag><TAB><batch>
+#   batch<TAB><K><TAB><status><TAB><arg><TAB><members><TAB><full suites>
 #
-# Statuses, decided from the phase's ledger lines ('<role> dispatched' lines
-# are progress markers and never change a status):
-#   merged       a 'merged to base (<sha>)' line exists; arg is the sha
-#   failed       its last line is 'failed — …'
-#   landable     integration is open and the last line is
-#                'integration verified PASS <sha>'; arg is the sha. An
-#                'integrating — … ready <sha>' line is landable only when the
-#                phase was queued by an old-style 'verified PASS' line (see
-#                below); otherwise it waits for the integration verifier
-#   integrating  integration is open (an 'integrating' line after the last
-#                'failed' line), anything else
-#   held         last line 'held — waits on phase <M> …'; arg is M
-#   queued       last line 'executed — …' (the lead returned DONE, or a
-#                phase was requeued), or an old-style 'verified PASS <sha>'
-#                line; arg is the sha to integrate; the line number orders
-#                the integration queue
-#   active       anything else: started and working
+# Phase statuses, decided from the phase's ledger lines and its batches'
+# ('<role> dispatched' lines are progress markers and never change a status):
+#   merged    a 'merged to base (<sha>)' line exists; arg is the sha
+#   failed    its last line is 'failed — …'
+#   held      last line 'held — waits on phase <M> …'; arg is M
+#   batched   in the open batch; batch is its number
+#   (every status keeps the batch column while the phase has not been queued
+#   again since that batch, so a ladder attempt still names its batch)
+#   failing   its batch failed verification pinned on it, or the resolver
+#             could not merge it into its batch ('unresolved — …'), and no
+#             ladder attempt has started since; arg is the sha to repair,
+#             flag the next step (repair, rescue or exhausted), batch the
+#             batch it failed in
+#   queued    last line 'executed — …' (the lead returned DONE, or a phase
+#             was requeued), or an earlier-flow 'verified PASS <sha>' line;
+#             or a member of a failed batch the failure was not pinned on.
+#             arg is the sha to integrate; line orders the queue; flag is
+#             'solo' when it must be verified alone next: its batch failed
+#             without a pin, or it was requeued by an 'executed — still
+#             broken …' or 'executed — owner fix …' line
+#   active    anything else: started and working
 #
-# The sha of an 'executed' line is the end of its 'A..B' commit range, or
-# its last word when it has no range. The sha of a PASS line is the word
-# right after 'PASS'; write it as the line's last word all the same.
+# The sha of an 'executed' line is the end of its 'A..B' commit range, or its
+# last word when it has no range. The sha of an earlier-flow PASS line is the
+# word right after 'PASS'.
 #
-# Two ledger flows are read the same way. In the current flow a phase is
-# verified once, on the integrated tree: executed → integrating → integration
-# verified PASS → land. In the earlier flow a phase verifier ran first, and a
-# 'verified PASS <sha>' line queued the phase; its 'ready' integration then
-# landed the tree that verifier passed. Ledgers from either flow, or a mix of
-# both across phases, keep their meaning:
-#   - 'verified PASS <sha>' still queues the phase.
-#   - 'ready <sha>' is landable only when the line that queued this
-#     integration was 'verified PASS'; after an 'executed' line it is not.
-#   - an 'executed' line followed by a bare 'verifier dispatched' (the
-#     earlier flow's phase verifier) is active, not queued, until that
-#     verifier's outcome line.
+# Batch lines, written by phase-batch, phase-land and the controller:
+#   batch K: opened — phases 3@<sha> 5@<sha>
+#   batch K: built <sha>
+#   batch K: empty — every phase left it
+#   batch K: verified PASS — full suites all|partial — <sha>
+#   batch K: verified FAIL — pinned on phase 3[,5] — <reason>
+#   batch K: verified FAIL — not pinned — <reason>
+#   batch K: landed (<sha>)
+#   batch K: abandoned — <reason>   (a script refused the batch; its phases
+#                                    queue again, unflagged)
+# Batch statuses: open (merging its phases), conflict (a phase's merge waits
+# on the resolver; arg is that phase), built (arg is the sha to verify),
+# landable (passed; arg is the sha), landed, failed (arg is the pinned
+# phases, or '-'), empty, abandoned. A failed batch with a single phase left
+# in it counts as pinned on that phase. members are the phases the opened line names.
+# full suites is 'all' or 'partial' once the batch passed, '-' before.
 #
 # Attempts used is the count of 'repair — started' and 'rescue — started'
-# lines: the escalation ladder allows two.
+# lines: the escalation ladder allows two. A failed verification takes the
+# repair if it is unused, then the rescue; an unresolved merge goes straight
+# to the rescue.
 #
 # Usage: phase-state DESIGN_DOC
 set -euo pipefail
@@ -65,8 +77,74 @@ if [ ! -f "$ledger" ]; then
 fi
 
 awk '
+  function lastword(s,   k, w) {
+    k = split(s, w, " ")
+    return w[k]
+  }
+  function passsha(s,   t) {
+    t = s
+    sub(/^.*PASS +/, "", t)
+    sub(/[^0-9A-Za-z].*$/, "", t)
+    return t
+  }
+  function execsha(s) {
+    if (match(s, /\.\.[0-9a-f]+/)) return substr(s, RSTART + 2, RLENGTH - 2)
+    return lastword(s)
+  }
+  function sortnum(arr, cnt,   a, b, v) {
+    for (a = 2; a <= cnt; a++) {
+      v = arr[a]; b = a - 1
+      while (b >= 1 && arr[b] + 0 > v + 0) { arr[b + 1] = arr[b]; b-- }
+      arr[b + 1] = v
+    }
+  }
   /^run: draining/ { drain = NR }
   /^run: undrained/ { undrain = NR }
+  /^batch [0-9]+: / {
+    k = $2
+    sub(/:$/, "", k)
+    body = $0
+    sub(/^batch [0-9]+: /, "", body)
+    if (body ~ / dispatched$/) next
+    if (!(k in bseen)) { bseen[k] = 1; border[++bcount] = k }
+    if (body ~ /^opened — phases /) {
+      bopen[k] = NR
+      list = body
+      sub(/^opened — phases /, "", list)
+      m = split(list, mem, " ")
+      bmembers[k] = ""
+      for (j = 1; j <= m; j++) {
+        split(mem[j], pair, "@")
+        if (pair[1] == "") continue
+        bmembers[k] = bmembers[k] (bmembers[k] == "" ? "" : ",") pair[1]
+        member[k, pair[1]] = 1
+        inbatch[pair[1]] = k; inbatchnr[pair[1]] = NR; batchsha[pair[1]] = pair[2]
+      }
+    }
+    else if (body ~ /^built /) bbuilt[k] = lastword(body)
+    else if (body ~ /^empty/) bempty[k] = 1
+    else if (body ~ /^verified PASS/) {
+      bpass[k] = lastword(body)
+      bfull[k] = (body ~ /full suites all/) ? "all" : "partial"
+    }
+    else if (body ~ /^verified FAIL/) {
+      bfail[k] = NR
+      bpinned[k] = "-"
+      if (body ~ /^verified FAIL — pinned on phase [0-9]/) {
+        p = body
+        sub(/^verified FAIL — pinned on phase /, "", p)
+        sub(/[^0-9, ].*$/, "", p)
+        gsub(/ /, "", p)
+        sub(/,$/, "", p)
+        bpinned[k] = p
+        m = split(p, pins, ",")
+        for (j = 1; j <= m; j++) if (pins[j] != "") pinned[k, pins[j]] = 1
+      }
+    }
+    else if (body ~ /^landed/) blanded[k] = 1
+    else if (body ~ /^abandoned/) babandon[k] = 1
+    next
+  }
   /^phase [0-9]+: / {
     n = $2
     sub(/:$/, "", n)
@@ -86,58 +164,89 @@ awk '
       sub(/\).*$/, "", s)
       merged[n] = s
     }
-    if (body ~ /^failed/) { failnr[n] = NR; queuedby[n] = "" }
-    if (body ~ /^executed/) { queuedby[n] = "executed"; execnr[n] = NR }
-    if (body ~ /^verified PASS /) queuedby[n] = "verified"
-    if (body ~ /^integrating/) { integnr[n] = NR; integby[n] = queuedby[n] }
-    if (body ~ /^(repair|rescue) — started/) attempts[n]++
+    if (body ~ /^executed/) { queuenr[n] = NR; queuesha[n] = execsha(body); execnr[n] = NR }
+    if (body ~ /^verified PASS /) { queuenr[n] = NR; queuesha[n] = passsha(body) }
+    if (body ~ /^unresolved/ && (n in inbatch)) bunres[inbatch[n], n] = 1
+    if (body ~ /^repair — started/) { rep[n]++; attempts[n]++ }
+    if (body ~ /^rescue — started/) { res[n]++; attempts[n]++ }
   }
-  function lastword(s,   k, w) {
-    k = split(s, w, " ")
-    return w[k]
-  }
-  function passsha(s,   t) {
-    t = s
-    sub(/^.*PASS +/, "", t)
-    sub(/[^0-9A-Za-z].*$/, "", t)
-    return t
-  }
-  function execsha(s,   t) {
-    if (match(s, /\.\.[0-9a-f]+/)) return substr(s, RSTART + 2, RLENGTH - 2)
-    return lastword(s)
+  function nextstep(n, kind) {
+    if (kind == "unresolved") return (res[n] + 0 == 0) ? "rescue" : "exhausted"
+    if (rep[n] + 0 == 0) return "repair"
+    if (res[n] + 0 == 0) return "rescue"
+    return "exhausted"
   }
   END {
-    printf "run\t%s\n", ((drain > 0 && drain > undrain) ? "draining" : "normal")
-    # Ascending numeric order.
-    for (a = 2; a <= count; a++) {
-      v = order[a]; b = a - 1
-      while (b >= 1 && order[b] + 0 > v + 0) { order[b + 1] = order[b]; b-- }
-      order[b + 1] = v
+    # A failed batch with one phase left in it is pinned on that phase, even
+    # when the verdict said otherwise: verifying it alone again would loop.
+    for (k in bfail) {
+      if (bpinned[k] != "-") continue
+      m = split(bmembers[k], mem, ","); alone = ""; cnt = 0
+      for (j = 1; j <= m; j++)
+        if (!((k, mem[j]) in bunres)) { cnt++; alone = mem[j] }
+      if (cnt == 1) { bpinned[k] = alone; pinned[k, alone] = 1 }
     }
+    printf "run\t%s\n", ((drain > 0 && drain > undrain) ? "draining" : "normal")
+    sortnum(order, count)
     for (i = 1; i <= count; i++) {
       n = order[i]
       if (!(n in last)) continue
       body = last[n]
-      status = "active"; arg = ""
-      open = ((n in integnr) && integnr[n] > failnr[n] + 0)
+      status = "active"; arg = ""; flag = "-"; bat = "-"; line = lastnr[n]
+      k = ""
+      if ((n in inbatch) && inbatchnr[n] > queuenr[n] + 0) k = inbatch[n]
       if (n in merged) { status = "merged"; arg = merged[n] }
       else if (body ~ /^failed/) status = "failed"
-      else if (open) {
-        status = "integrating"
-        if (body ~ /^integration verified PASS /) { status = "landable"; arg = passsha(body) }
-        else if (body ~ /^integrating/ && body ~ / ready [0-9a-f]+$/ && integby[n] == "verified") {
-          status = "landable"; arg = lastword(body)
-        }
-      }
       else if (body ~ /^held — waits on phase [0-9]+/) {
         status = "held"
         arg = body
         sub(/^held — waits on phase /, "", arg)
         sub(/[^0-9].*$/, "", arg)
       }
-      else if (body ~ /^verified PASS /) { status = "queued"; arg = passsha(body) }
-      else if (body ~ /^executed/ && !(oldver[n] > execnr[n])) { status = "queued"; arg = execsha(body) }
-      printf "%s\t%s\t%s\t%s\t%d\n", n, status, arg, lastnr[n], attempts[n] + 0
+      else if (k != "") {
+        # In a batch since it was last queued. Once a ladder attempt starts
+        # after the failure, the phase is active until it is queued again.
+        if (body ~ /^unresolved/) {
+          status = "failing"; arg = batchsha[n]; flag = nextstep(n, "unresolved")
+        }
+        else if ((k in bfail) && ((k, n) in pinned)) {
+          if (lastnr[n] < bfail[k]) { status = "failing"; arg = batchsha[n]; flag = nextstep(n, "failed") }
+        }
+        else if ((k in bfail) || (k in babandon)) {
+          status = "queued"; arg = batchsha[n]; line = queuenr[n]
+          if ((k in bfail) && bpinned[k] == "-") flag = "solo"
+        }
+        else if (!(k in blanded)) status = "batched"
+        bat = k
+      }
+      else if (body ~ /^verified PASS /) { status = "queued"; arg = queuesha[n]; line = queuenr[n] }
+      else if (body ~ /^executed/ && !(oldver[n] > execnr[n])) {
+        status = "queued"; arg = queuesha[n]; line = queuenr[n]
+        if (body ~ /still broken|owner fix/) flag = "solo"
+      }
+      printf "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", n, status, arg, line, attempts[n] + 0, flag, bat
+    }
+    sortnum(border, bcount)
+    for (i = 1; i <= bcount; i++) {
+      k = border[i]
+      if (!(k in bopen)) continue
+      status = "open"; arg = "-"
+      if (k in blanded) { status = "landed"; arg = bpass[k] }
+      else if (k in bempty) status = "empty"
+      else if (k in babandon) status = "abandoned"
+      else if (k in bfail) { status = "failed"; arg = bpinned[k] }
+      else if (k in bpass) { status = "landable"; arg = bpass[k] }
+      else if (k in bbuilt) { status = "built"; arg = bbuilt[k] }
+      else {
+        m = split(bmembers[k], mem, ",")
+        for (j = 1; j <= m; j++) {
+          p = mem[j]
+          if (inbatch[p] == k && lastnr[p] > inbatchnr[p] && last[p] ~ ("^batched — batch " k ", conflict")) {
+            status = "conflict"; arg = p
+          }
+        }
+      }
+      printf "batch\t%s\t%s\t%s\t%s\t%s\n", k, status, arg, bmembers[k], ((k in bfull) ? bfull[k] : "-")
     }
   }
 ' "$ledger"

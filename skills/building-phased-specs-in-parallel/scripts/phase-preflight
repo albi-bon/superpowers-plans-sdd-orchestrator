@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # Run the shared phase-preflight under this skill's run-directory namespace,
-# then refuse a run whose phase worktrees hold an interrupted agent's changes.
-# The shared preflight only sees the main checkout; .worktrees/ ignores itself,
-# so a dirty phase worktree would otherwise pass unnoticed. `pwd -P` resolves
-# the installed skill symlink to this checkout, where shared/ lives.
+# then refuse a run whose phase worktrees hold an interrupted agent's changes,
+# or whose repository has no origin remote to push to. The shared preflight
+# only sees the main checkout; .worktrees/ ignores itself, so a dirty phase
+# worktree would otherwise pass unnoticed. This skill pushes phase branches
+# and base to origin and opens a pull request at the end, so a missing remote
+# refuses the run before anything starts rather than after the last phase.
+# `pwd -P` resolves the installed skill symlink to this checkout, where
+# shared/ lives.
+#
+# Exit codes: those of the shared preflight and phase-worktree check, and
+#   16  the repository has no 'origin' remote
 #
 # Usage: phase-preflight DESIGN_DOC BASE RANGE
 set -euo pipefail
@@ -13,6 +20,11 @@ shared="$here/../../../shared/scripts"
 if [ "$#" -ne 3 ]; then
   echo "usage: phase-preflight DESIGN_DOC BASE RANGE" >&2
   exit 2
+fi
+if git rev-parse --show-toplevel >/dev/null 2>&1 && ! git remote get-url origin >/dev/null 2>&1; then
+  echo "no 'origin' remote: this skill pushes phase branches and base, and opens a pull request" >&2
+  echo "add one first (git remote add origin <url>)" >&2
+  exit 16
 fi
 out=$("$shared/phase-preflight" "$@")
 "$shared/phase-worktree" "$1" "$2" check

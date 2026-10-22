@@ -6,12 +6,14 @@ end to end, unattended, one branch per phase, merging each into a base branch:
 | Skill | Use it for | Per phase |
 |---|---|---|
 | `building-phased-specs` | Design documents that are already researched and decided — the everyday path | a scout grounds the phase and writes a short brief; a phase lead has one worker build each task, one reviewer review the branch, and a fix wave apply the accepted findings; a verifier checks gates and deliverables |
-| `building-phased-specs-in-parallel` | The same per-phase work, when the document's phases form a graph rather than a chain | as `building-phased-specs`, but every phase whose `Depends on` phases have landed starts at once (up to 3 by default) in its own git worktree; a phase sharing code files with one in flight goes to an overlap judge, which holds it only when both make major changes to the same domain; each built phase merges the moved base into itself, has conflicts resolved, and is verified once — gates and acceptance check — on that integrated tree, then lands; a failing phase gets a repair and a rescue, then the run drains |
+| `building-phased-specs-in-parallel` | The same per-phase work, when the document's phases form a graph rather than a chain | as `building-phased-specs`, but every phase whose `Depends on` phases have landed starts at once (up to 3 by default) in its own git worktree; a phase sharing code files with one in flight goes to an overlap judge, which holds it only when both make major changes to the same domain; built phases queue, and whenever the verifier is free every queued phase is merged onto one batch branch off base, conflicts resolved, and the combined tree is verified once — gates and acceptance check — then lands and base is pushed; a failure is pinned on one phase, which gets a repair and a rescue while the rest land without it; the run ends with a pull request |
 | `orchestrating-phased-specs` | Exploratory specs that benefit from a full implementation plan | writes a Superpowers plan, executes it with `subagent-driven-development`, verifies |
 | `executing-phased-specs` | The same plan-driven path, trying inline execution | writes a Superpowers plan; one executor implements every task itself with `executing-plans`, then dispatches one fresh reviewer over the phase and runs one fix round; verifies |
 
 All four share the scripts in `shared/scripts/`, keep a resumable ledger, and end
-at a report — nothing pushed, no PR opened. The sequential three run exactly one
+at a report. The sequential three push nothing and open no PR; the parallel skill
+pushes its branches to `origin` and opens a pull request from base, never merging
+it. The sequential three run exactly one
 repair attempt per phase; the parallel skill allows a repair and a rescue. Each
 skill keeps its runs in its own run directory (`.superpowers/phase-builder/`,
 `.superpowers/phase-orchestrator/`, `.superpowers/phase-executor/` and
@@ -37,7 +39,8 @@ host if a skill is not visible.
 installed.
 `building-phased-specs` needs nothing beyond Bash, Git and nested agents;
 `building-phased-specs-in-parallel` also needs background agents and room for
-`1 + 2 × cap` of them at once. Read
+`1 + 2 × cap` of them at once, an `origin` remote it can push to, and an
+authenticated `gh` for the pull request. Read
 each skill's `platform-guide.md` for dispatch, model mapping and permissions.
 
 ## Invoke
@@ -64,7 +67,7 @@ those plans executed inline or name it.
 ```
 shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
-                         phase-overlap, phase-worktree, phase-integrate, phase-land
+                         phase-overlap, phase-worktree, phase-batch, phase-land, phase-push, phase-pr
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill
 skills/<name>/           SKILL.md, dispatch templates, platform guide
 skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace

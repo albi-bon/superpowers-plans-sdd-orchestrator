@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# Build one integration batch: a branch off the base tip with every phase in
+# the batch merged onto it, one after another, so the integration verifier
+# checks the combined tree once instead of one phase at a time.
+#
+# Batches are built in one integration worktree, <main>/.worktrees/integration,
+# reused by every batch of the run so its installed dependencies carry over.
+# Batch K lives on branch phase-batch-<K>. Each phase is merged by its queued
+# sha with 'merge: phase <N> — <title>', the subject base's own history uses,
+# so a landed batch reads on base exactly like phases landed one by one.
+# Base moves only through phase-land, and only one batch is open at a time,
+# so base cannot move under a batch while it is built or verified.
+#
+# Subcommands:
+#   open N@SHA [N@SHA…]  check every phase branch is at its sha, number the
+#                        batch, record 'batch K: opened — phases …', create
+#                        its branch at the base tip, then build it
+#   build K              merge the batch's remaining phases. A phase the
+#                        resolver gave up on ('unresolved') is left out; a
+#                        phase already in the branch is skipped. Idempotent.
+#   final                put the integration worktree on the base tip,
+#                        detached, for the run's final full-suite check
+#
+# open and build print exactly one outcome and record it in the ledger:
+#   built K <sha>          every phase is in: verify the batch at <sha>
+#   conflict K N <M,…|->   merging phase N stopped on conflicts; the merge is
+#                          left in progress and the conflicted paths are in
+#                          <run-dir>/phase-<N>-conflicts.md. M,… are the phases
+#                          already on the other side: merged into base since
+#                          N forked, then earlier in this batch
+#   empty K                every phase left the batch; nothing to verify
+# final prints 'final <sha>'.
+#
+# Exit codes:
+#   0   one of the outcomes above
+#   2   usage error
+#   14  the batch branch exists and the ledger does not account for it
+#   17  open: a batch is already open; final: a batch is still open
+#   18  build: no such open batch
+#   19  a phase branch is not at the sha it was queued with (named on stderr)
+#   20  a phase's merge failed for a reason other than conflicts; it was
+#       aborted, and stderr names the phase
+#
+# Usage: phase-batch DESIGN_DOC BASE open N@SHA [N@SHA…]
+#        phase-batch DESIGN_DOC BASE build K
+#        phase-batch DESIGN_DOC BASE final
+set -euo pipefail
+
+usage() {
+  echo "usage: phase-batch DESIGN_DOC BASE open N@SHA [N@SHA…]" >&2
+  echo "       phase-batch DESIGN_DOC BASE build K" >&2
+  echo "       phase-batch DESIGN_DOC BASE final" >&2
+  exit 2
+}
+
+[ "$#" -ge 3 ] || usage
+doc=$1
+base=$2
+sub=$3
+shift 3
+case "$sub" in
+  open) [ "$#" -ge 1 ] || usage ;;
+  build)
+    [ "$#" -eq 1 ] || usage
+    case "$1" in '' | *[!0-9]*) echo "batch number must be an integer" >&2; exit 2 ;; esac
+    ;;
+  final) [ "$#" -eq 0 ] || usage ;;
+  *) usage ;;
+esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+wt="$main/.worktrees/integration"
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+
+branch_of() {
+  printf 'phase-%s-%s\n' "$1" "$("$here/parse-phases" "$doc" "$1" | cut -f3)"
+}
+title_of() {
+  "$here/parse-phases" "$doc" "$1" | cut -f2
+}
+open_batch() { # the open batch's number, if any
+  "$here/phase-state" "$doc" | awk -F'\t' '
+    $1 == "batch" && ($3 == "open" || $3 == "conflict" || $3 == "built" || $3 == "landable") { print $2 }'
+}
+registered() {
+  git worktree list --porcelain | grep -qx "worktree $1"
+}
+ensure_worktree() {
+  if ! { registered "$wt" && [ -d "$wt" ]; }; then
+    git worktree prune
+    mkdir -p "$main/.worktrees"
+    printf '*\n' > "$main/.worktrees/.gitignore"
+    git worktree add -q --detach "$wt" "$base" >&2
+  fi
+}
+# Nothing in the integration worktree is anyone's work outside a resolver's
+# merge, which phase-batch never touches: the resolver commits, and the
+# verifier commits nothing. Tracked changes left behind — a lockfile setup
+# rewrote, snapshots a test run updated — are discarded before the worktree
+# moves on. Untracked files (installed dependencies) are kept.
+reset_tracked() {
+  if [ -n "$(git -C "$wt" status --porcelain --untracked-files=no)" ]; then
+    git -C "$wt" reset -q --hard
+  fi
+}
+
+case "$sub" in
+  final)
+    if [ -n "$(open_batch)" ]; then
+      echo "batch $(open_batch) is still open: land or fail it before the final check" >&2
+      exit 17
+    fi
+    ensure_worktree
+    reset_tracked
+    git -C "$wt" switch -q --detach "$base"
+    echo "final $(git -C "$wt" rev-parse --short HEAD)"
+    exit 0
+    ;;
+
+  open)
+    current=$(open_batch)
+    if [ -n "$current" ]; then
+      echo "batch $current is already open: build, verify and land or fail it first" >&2
+      exit 17
+    fi
+    list=""
+    for pair in "$@"; do
+      num=${pair%%@*}
+      sha=${pair#*@}
+      case "$num" in '' | *[!0-9]*) echo "not N@SHA: '$pair'" >&2; exit 2 ;; esac
+      [ "$sha" != "$pair" ] && [ -n "$sha" ] || { echo "not N@SHA: '$pair'" >&2; exit 2; }
+      branch=$(branch_of "$num")
+      if ! want=$(git rev-parse --verify --quiet "$sha^{commit}"); then
+        echo "phase $num: '$sha' is not a commit in this repository" >&2
+        exit 19
+      fi
+      if [ "$(git rev-parse --verify --quiet "refs/heads/$branch" || true)" != "$want" ]; then
+        echo "phase $num: branch '$branch' is not at the queued $sha: requeue the phase at its HEAD" >&2
+        exit 19
+      fi
+      list="$list $num@$(git rev-parse --short "$want")"
+    done
+    k=$(( $(grep -c '^batch [0-9][0-9]*: opened' "$ledger" || true) + 1 ))
+    if git show-ref --verify --quiet "refs/heads/phase-batch-$k"; then
+      echo "branch 'phase-batch-$k' exists and this run's ledger does not account for it." >&2
+      echo "delete it (git branch -D phase-batch-$k) or resume the run that created it" >&2
+      exit 14
+    fi
+    ensure_worktree
+    if git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+      git -C "$wt" merge --abort
+    fi
+    reset_tracked
+    printf 'batch %s: opened — phases%s\n' "$k" "$list" >> "$ledger"
+    ;;
+
+  build)
+    k=$1
+    if [ "$(open_batch)" != "$k" ]; then
+      echo "batch $k is not open" >&2
+      exit 18
+    fi
+    ensure_worktree
+    ;;
+esac
+
+# --- build batch k -------------------------------------------------------------
+
+record() { printf '%s\n' "$1" >> "$ledger"; }
+opened_nr=$(grep -n "^batch $k: opened — " "$ledger" | tail -n 1 | cut -d: -f1)
+members=$(sed -n "${opened_nr}s/^batch $k: opened — phases //p" "$ledger")
+
+if git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  # A conflict this batch recorded, still waiting on its resolver: say so
+  # again. Any other merge in progress is this script's own, interrupted
+  # before it was recorded: abort it, and merge that phase again below.
+  num=$("$here/phase-state" "$doc" | awk -F'\t' -v k="$k" '$1 == "batch" && $2 == k && $3 == "conflict" { print $4 }')
+  if [ -n "$num" ]; then
+    others=$(sed -n 's/^- phase \([0-9][0-9]*\)$/\1/p' "$rundir/phase-$num-conflicts.md" 2>/dev/null \
+      | tr '\n' ',' | sed 's/,$//' || true)
+    echo "conflict $k $num ${others:--}"
+    exit 0
+  fi
+  git -C "$wt" merge --abort
+fi
+reset_tracked
+if [ "$(git -C "$wt" branch --show-current)" != "phase-batch-$k" ]; then
+  if git show-ref --verify --quiet "refs/heads/phase-batch-$k"; then
+    git -C "$wt" switch -q "phase-batch-$k"
+  else
+    git -C "$wt" switch -q -c "phase-batch-$k" "$base"
+  fi
+fi
+# Branches of landed batches are fully on base by now.
+for landed in $("$here/phase-state" "$doc" | awk -F'\t' '$1 == "batch" && $3 == "landed" { print $2 }'); do
+  git branch -q -d "phase-batch-$landed" >/dev/null 2>&1 || true
+done
+
+left() { # did phase $1 leave batch k? (the resolver could not merge it)
+  awk -v n="$1" -v from="$opened_nr" '
+    NR > from && index($0, "phase " n ": unresolved") == 1 { found = 1 }
+    END { exit !found }' "$ledger"
+}
+
+fork_landed() { # fork_landed SHA — phases merged into base since SHA forked
+  local fork
+  fork=$(git -C "$wt" merge-base "$base" "$1")
+  git -C "$wt" log --first-parent --format=%s "$fork..$base" \
+    | sed -n 's/^merge: phase \([0-9][0-9]*\) — .*/\1/p'
+}
+
+in_batch=""
+count=0
+for pair in $members; do
+  num=${pair%%@*}
+  sha=${pair#*@}
+  if left "$num"; then
+    continue
+  fi
+  title=$(title_of "$num")
+  if git -C "$wt" merge-base --is-ancestor "$sha" HEAD; then
+    if ! grep -q "^phase $num: batched — batch $k," "$ledger"; then
+      at=$(git -C "$wt" log --first-parent --format='%h %s' "$base..HEAD" \
+        | awk -v s="merge: phase $num — " 'index(substr($0, index($0, " ") + 1), s) == 1 { print $1; exit }')
+      record "phase $num: batched — batch $k, clean merge ${at:-$(git -C "$wt" rev-parse --short HEAD)}"
+    fi
+    in_batch="$in_batch $num"
+    count=$((count + 1))
+    continue
+  fi
+  if git -C "$wt" merge -q --no-ff "$sha" -m "merge: phase $num — $title" >/dev/null 2>&1; then
+    record "phase $num: batched — batch $k, clean merge $(git -C "$wt" rev-parse --short HEAD)"
+    in_batch="$in_batch $num"
+    count=$((count + 1))
+    continue
+  fi
+  if ! git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    git -C "$wt" merge --abort >/dev/null 2>&1 || true
+    echo "phase $num: its merge into batch $k failed without conflicts; aborted" >&2
+    exit 20
+  fi
+  # shellcheck disable=SC2086 # one phase number per word
+  others=$( { fork_landed "$sha"; printf '%s\n' $in_batch; } | { grep . || true; } | sort -nu | tr '\n' ',' | sed 's/,$//')
+  files=$(git -C "$wt" diff --name-only --diff-filter=U)
+  fcount=$(printf '%s\n' "$files" | grep -c . || true)
+  {
+    printf '# Phase %s — conflicts merging it into batch %s\n\n' "$num" "$k"
+    printf 'Merging phase %s (%s) into phase-batch-%s stopped on conflicts. The merge is in\nprogress in %s.\n' "$num" "$sha" "$k" "$wt"
+    printf 'The batch side ("ours") is %s plus the phases merged into the batch before this one.\n\n' "$base"
+    printf '## Phases on the other side\n\n'
+    if [ -n "$others" ]; then
+      printf '%s\n' "$others" | tr ',' '\n' | sed 's/^/- phase /'
+    else
+      printf -- '- none recorded\n'
+    fi
+    printf '\n## Conflicted paths\n\n'
+    printf '%s\n' "$files" | sed 's/^/- /'
+  } > "$rundir/phase-$num-conflicts.md"
+  record "phase $num: batched — batch $k, conflict in $fcount files"
+  echo "conflict $k $num ${others:--}"
+  exit 0
+done
+
+if [ "$count" -eq 0 ]; then
+  grep -q "^batch $k: empty" "$ledger" || record "batch $k: empty — every phase left it"
+  echo "empty $k"
+  exit 0
+fi
+short=$(git -C "$wt" rev-parse --short HEAD)
+grep -q "^batch $k: built " "$ledger" || record "batch $k: built $short"
+echo "built $k $short"

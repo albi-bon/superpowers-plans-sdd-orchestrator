@@ -1,8 +1,9 @@
 # Rescue Dispatch Template
 
-The second and last attempt on a failing phase. Dispatched after a repair did not
-make verification pass, or directly when the resolver could not resolve an
-integration merge. A repair fixes what the evidence names; the rescue may change
+The second and last attempt on a failing phase. Dispatched when a batch fails
+pinned on a phase whose repair is spent, or directly when the resolver could not
+merge the phase into its batch — in both cases once the phases verified beside
+it have landed. A repair fixes what the evidence names; the rescue may change
 the approach. There is never a third attempt. Substitute every uppercase
 placeholder value before dispatching.
 
@@ -26,13 +27,13 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     Phase number:    PHASE_NUMBER
     Phase branch:    PHASE_BRANCH          (checked out in WORKTREE)
     Base branch:     BASE
-    Evidence:        EVIDENCE_PATHS        (every verification and integration evidence file so far)
+    Evidence:        EVIDENCE_PATHS        (every batch evidence file that verified this phase so far)
     Repair report:   REPAIR_REPORT_PATH    (what the repair tried, or "none")
     Rescue report:   RESCUE_REPORT_PATH    (you write it)
     Brief:           BRIEF_PATH
     Decisions file:  DECISIONS_PATH
-    Integration:     INTEGRATION_CONTEXT   (the merged phases' brief and decisions paths, or "none")
-    Conflicts file:  CONFLICTS_PATH        (set when an integration merge was left unresolved, or "none")
+    Integration:     INTEGRATION_CONTEXT   (brief and decisions paths of the phases batched beside this one, or "none")
+    Conflicts file:  CONFLICTS_PATH        (set when the merge into a batch was left unresolved, or "none")
     Testing policy:  TESTING_POLICY_PATH
     Decision policy: DECISION_POLICY_PATH  (read it before you start)
 
@@ -40,35 +41,41 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     ## Your job
 
-    1. Read every evidence file, newest last, then the repair report. Work out
-       why the repair did not hold: a wrong diagnosis, a symptom fixed instead
-       of a cause, or a phase whose approach cannot meet its checks.
+    1. Read every evidence file, newest last, then the repair report. The
+       failures pinned on PHASE_NUMBER are yours. Work out why the repair did
+       not hold: a wrong diagnosis, a symptom fixed instead of a cause, or a
+       phase whose approach cannot meet its checks. With no repair before you
+       and CONFLICTS_PATH set, the phase never reached verification: its merge
+       could not be resolved.
     2. Read the brief, the decisions file, and phase PHASE_NUMBER's section of
-       the design document. If INTEGRATION_CONTEXT is not "none", read the
-       merged phases' briefs and decisions too: the failure is in how this
-       phase meets their work.
-    3. Fix the root cause. You may rework a task's implementation, change an
+       the design document. If INTEGRATION_CONTEXT is not "none", read those
+       phases' briefs and decisions too: they are on BASE now, and the failure
+       may be in how this phase meets their work.
+    3. Bring BASE in first, so you work on the tree this phase will next be
+       verified on. If `git merge-base --is-ancestor BASE HEAD` fails, run
+       `git merge --no-ff BASE -m "integrate: base into phase PHASE_NUMBER"`.
+       If CONFLICTS_PATH is not "none", this is where the conflicts the
+       resolver could not settle come back. Resolve every conflict so both
+       sides' behaviour holds, regenerate lockfiles with the repository's
+       package manager rather than merging them by hand, regenerate generated
+       files and ORM migration metadata with the repository's own commands
+       (this phase's migration rebuilt on top of the base's latest), and
+       conclude the merge. Adapt this phase's code to the base where the two
+       cannot otherwise coexist. If a manifest or lockfile changed, run the
+       brief's `Setup:` line before any check.
+    4. Fix the root cause. You may rework a task's implementation, change an
        approach the brief chose, re-scope a task against the current base,
        or build a missing prerequisite. Every departure from the brief is a
        significant decision; record it in DECISIONS_PATH under the decision
        policy. Do not paper over a failure by weakening, skipping, or deleting
        the check that caught it.
-    4. If CONFLICTS_PATH is not "none", the integration merge was aborted and
-       PHASE_BRANCH is back at its built commit. Redo it:
-       `git merge --no-ff BASE -m "integrate: base into phase PHASE_NUMBER"`,
-       resolve every conflict so both sides' behaviour holds, regenerate
-       lockfiles with the repository's package manager rather than merging
-       them by hand, regenerate generated files and ORM migration metadata
-       with the repository's own commands (this phase's migration rebuilt on
-       top of the base's latest), and conclude the merge. Adapt this phase's code to the
-       base where the two cannot otherwise coexist.
     5. Re-run what failed — the failing tests themselves, not the whole
        suite that contained them — plus the brief's `Checks:` over the files
        you changed, and confirm each exits 0. Do not run a command from the
-       brief's `Full suites:` line; the integration verifier runs the rest
-       after you. A command
-       that prints an all-green summary and exits non-zero has NOT passed —
-       judge by the exit code, never by the printed totals.
+       brief's `Full suites:` line; the next batch's verifier runs the rest
+       after you. A command that prints an all-green summary and exits
+       non-zero has NOT passed — judge by the exit code, never by the printed
+       totals.
     6. Commit your work on PHASE_BRANCH and leave the working tree clean.
     7. Write RESCUE_REPORT_PATH: the root cause, why the repair missed it,
        what you changed and why, and the commands you ran with their exit
@@ -77,11 +84,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     ## Constraints
 
     - Work only inside WORKTREE. Do NOT touch the main checkout, the base
-      branch BASE, or any other phase's worktree or branch. Other phases are
-      being built beside this one right now.
+      branch BASE, the integration worktree, or any other phase's worktree or
+      branch. Other phases are being built beside this one right now.
     - Do NOT switch branches, create branches, rebase, or push. The only
-      merge you may run is the integration merge in step 4, of BASE into
-      PHASE_BRANCH.
+      merge you may run is the one in step 3, of BASE into PHASE_BRANCH.
     - Stay inside the phase's scope. Making this phase pass on the current
       base is the job; improving neighbouring code is not.
     - Return STILL_BROKEN only when you could not make the failing checks
