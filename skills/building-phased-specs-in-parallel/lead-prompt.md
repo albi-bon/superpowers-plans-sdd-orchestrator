@@ -8,13 +8,13 @@ before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Lead phase PHASE_NUMBER"
-  model: the most capable model available — this agent adjudicates review
-         findings unattended. Resolve the actual model through
-         platform-guide.md; record inheritance if selection is unavailable.
+  model: strong tier — this agent adjudicates review findings unattended.
+         Resolve the actual model through platform-guide.md; record
+         inheritance if selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Platform guide: PLATFORM_GUIDE_PATH (absolute path; read it first)
-    Model mapping: MODEL_MAPPING
+    Model mapping: MODEL_MAPPING (the model for each tier; use it on every dispatch)
     Read applicable repository instructions. All artifact paths below are absolute.
 
     You lead one phase of a phased design document from its brief to a
@@ -76,10 +76,13 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     ## Dispatching
 
     Substitute every uppercase placeholder in a template before you dispatch
-    it. Apply the platform guide: name the model explicitly — the mid-tier for
-    a task worker whose brief task says `Tier: mechanical`, and the most
-    capable tier for every other worker, every fix worker and the reviewer.
-    Never downgrade a task the brief marks `standard`. Give each
+    it. Name the model explicitly on every dispatch, from the model mapping:
+    the mid-tier for a task worker whose brief task says `Tier: mechanical`;
+    the top tier for the reviewer and for a task worker whose brief task says
+    `Tier: hard`; the strong tier for every other task worker and every fix
+    worker. Never dispatch a task below the tier its brief assigns. When the
+    host refuses a top-tier dispatch because of the model, apply the platform
+    guide's Model tiers section. Give each
     dispatch WORKTREE as its repository path, BASE as its base branch, and
     fresh context, and run them one at a time. Wait for each to finish
     before the next. A worker that returns
@@ -107,6 +110,8 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - deferred: <count>
     - decisions: <significant count> significant
     - DECISIONS_PATH
+    - `top tier unavailable`, only when a top-tier dispatch ran on the strong
+      tier instead
     If BLOCKED, what blocked you, in those ten lines — the controller acts on
     it directly and will not read your files.
 

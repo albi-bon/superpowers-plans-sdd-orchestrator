@@ -51,6 +51,14 @@ done
 # --- invocation, scheduling, integration, ladder, drain ------------------------
 
 has 'otherwise **3**' 'CAP defaults to 3'
+has '| `MODEL_MAPPING` | a model mapping stated in the request; otherwise the host default' 'the model mapping needs no instruction'
+has 'run: models — <MODEL_MAPPING>' 'records the model mapping in the ledger'
+has '| scout | `scout-prompt.md` | strong |' 'the scout is strong tier'
+has '| overlap judge | `overlap-judge-prompt.md` | top |' 'the judge is top tier'
+has '| repair | `repair-prompt.md` | top |' 'repair is top tier'
+has '| rescue | `rescue-prompt.md` | top |' 'rescue is top tier'
+has '| resolver | `resolver-prompt.md` | top |' 'the resolver is top tier'
+has '`Tier: hard` on the top tier' 'a hard task worker is top tier'
 has 'SETUP_COMMAND' 'takes an optional setup command'
 has 'parse-deps" --write' 'records the graph at preflight'
 has 'graph agent' 'falls back to the graph agent'

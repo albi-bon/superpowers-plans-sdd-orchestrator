@@ -10,7 +10,8 @@
 #
 # The run shown is the most recently written ledger under
 # .superpowers/<namespace>/ whose run has not finished (no 'RUN COMPLETE' or
-# 'run: PR' line) and that was written in the last 7 days. Example:
+# 'run: PR' line, or an agent dispatched after the last one, as on a resume)
+# and that was written in the last 7 days. Example:
 #
 #   feat/x · 2/6 merged · 2 building · 1 queued · batch 3 verifying 2 · 1 repairing · 1 held · 1 left · idle 40m
 #
@@ -55,7 +56,12 @@ now=$(date +%s)
 best=""; best_t=0; others=0
 for ledger in "$root"/*/run.md; do
   [ -f "$ledger" ] || continue
-  grep -q '^RUN COMPLETE\|^run: PR ' "$ledger" && continue
+  # Finished when a finish marker has no dispatch after it; a resumed run
+  # dispatches again after its earlier PR line.
+  fin=$(grep -n '^RUN COMPLETE\|^run: PR ' "$ledger" | tail -n 1 | cut -d: -f1)
+  if [ -n "$fin" ]; then
+    tail -n +"$((fin + 1))" "$ledger" | grep -q ' dispatched$' || continue
+  fi
   t=$(mtime "$ledger")
   [ $((now - t)) -le 604800 ] || continue
   if [ -n "$best" ]; then others=$((others + 1)); fi

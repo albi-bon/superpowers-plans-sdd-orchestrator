@@ -10,9 +10,10 @@ before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Repair phase PHASE_NUMBER after a failed verification"
-  model: the most capable model available — this is fresh eyes on something a
-         whole phase of work did not get right. Resolve the actual model
-         through platform-guide.md; record inheritance if selection is unavailable.
+  model: top tier, the most capable model available — this is fresh eyes
+         on something a whole phase of work did not get right. Resolve the
+         actual model through platform-guide.md; record inheritance if
+         selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Read applicable repository instructions. All artifact paths below are absolute.

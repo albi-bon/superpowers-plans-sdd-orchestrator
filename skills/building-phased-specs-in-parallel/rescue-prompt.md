@@ -10,10 +10,10 @@ placeholder value before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Rescue phase PHASE_NUMBER"
-  model: the most capable model available — a scoped fix already failed, or
-         a merge could not be resolved; this needs fresh judgement on the
-         whole phase. Resolve the actual model through platform-guide.md;
-         record inheritance if selection is unavailable.
+  model: top tier, the most capable model available — a scoped fix already
+         failed, or a merge could not be resolved; this needs fresh judgement
+         on the whole phase. Resolve the actual model through
+         platform-guide.md; record inheritance if selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Read applicable repository instructions. All artifact paths below are absolute.

@@ -64,6 +64,10 @@ has scout-prompt.md 'Do not assume a claim is true' 'grounds claims in the code'
 has scout-prompt.md 'never a reason to stop' 'drift never stops the scout'
 has scout-prompt.md 'BRIEF_PATH already exists' 'the scout resumes an existing brief'
 has scout-prompt.md 'Tier: mechanical' 'assigns task tiers'
+has scout-prompt.md 'Tier: hard' 'assigns the hard tier'
+has scout-prompt.md 'likely to pass the task'"'"'s own tests' 'states what makes a task hard'
+has scout-prompt.md 'Most phases have no hard task' 'keeps hard tasks rare'
+has scout-prompt.md 'model: strong tier' 'the scout runs on the strong tier'
 has scout-prompt.md 'five lines' 'return contract is capped'
 
 # --- lead-prompt.md --------------------------------------------------------
@@ -74,7 +78,11 @@ has lead-prompt.md 'REVIEWER_TEMPLATE_PATH' 'receives the reviewer template'
 has lead-prompt.md 'PHASE_BASE_SHA' 'receives the phase base for the review range'
 has lead-prompt.md 'dispatch WORKTREE as its repository path' 'passes the worktree to its children'
 has lead-prompt.md '`Tier: mechanical`' 'applies the brief tier'
-has lead-prompt.md 'Never downgrade a task the brief marks `standard`' 'never downgrades a standard task'
+has lead-prompt.md '`Tier: hard`' 'applies the hard tier'
+has lead-prompt.md 'the top tier for the reviewer' 'reviews on the top tier'
+has lead-prompt.md 'Never dispatch a task below the tier its brief assigns' 'never downgrades a task'
+has lead-prompt.md 'model: strong tier' 'the lead runs on the strong tier'
+has lead-prompt.md 'top tier unavailable' 'reports a top-tier fallback'
 has lead-prompt.md 'Do not review again' 'no re-review after the fix wave'
 has lead-prompt.md 'first unticked task' 'the lead resumes from the brief'
 has lead-prompt.md 'RESUME_NOTES' 'takes a worker return the previous lead never received'
@@ -89,6 +97,9 @@ has worker-prompt.md 'Task form' 'has a task form'
 has worker-prompt.md 'Fix form' 'has a fix form, used for the fix wave'
 has worker-prompt.md "in this phase's own worktree" 'works in its worktree'
 has worker-prompt.md '`Tier: mechanical`' 'model follows the brief tier'
+has worker-prompt.md 'top tier for a task marked
+         `Tier: hard`' 'a hard task gets the top tier'
+has worker-prompt.md 'strong tier for a task marked `Tier: standard`' 'a standard task gets the strong tier'
 has worker-prompt.md 'Returning DONE with a failing check is not a valid return' 'no DONE on red'
 has worker-prompt.md 'six lines' 'return contract is capped'
 
@@ -97,6 +108,7 @@ has worker-prompt.md 'six lines' 'return contract is capped'
 exists reviewer-prompt.md
 has reviewer-prompt.md 'PHASE_BASE_SHA..HEAD' 'reviews the phase range, not trunk'
 has reviewer-prompt.md 'Do NOT edit, fix, or commit' 'the reviewer edits nothing'
+has reviewer-prompt.md 'top tier, the most capable model available' 'the reviewer is top tier'
 has reviewer-prompt.md 'three lines' 'return contract is capped'
 
 # --- repair-prompt.md ------------------------------------------------------
@@ -107,6 +119,7 @@ has repair-prompt.md 'Bring BASE in first' 'merges base in before fixing'
 has repair-prompt.md 'The failures pinned on' 'fixes only the failures pinned on its phase'
 has repair-prompt.md 'You get one attempt' 'one attempt'
 has repair-prompt.md 'weakening, skipping, or deleting the check' 'never weakens the check'
+has repair-prompt.md 'top tier, the most capable model available' 'repair is top tier'
 has repair-prompt.md 'six lines' 'return contract is capped'
 
 # --- rescue-prompt.md ------------------------------------------------------
@@ -121,7 +134,7 @@ has rescue-prompt.md 'significant decision' 'every departure is significant'
 has rescue-prompt.md 'git merge --no-ff BASE' 'merges base in'
 has rescue-prompt.md 'Bring BASE in first' 'merges base in before fixing'
 has rescue-prompt.md 'weakening, skipping, or deleting' 'never weakens the check'
-has rescue-prompt.md 'the most capable model available' 'rescue is most capable'
+has rescue-prompt.md 'top tier, the most capable model available' 'rescue is top tier'
 has rescue-prompt.md 'FIXED or STILL_BROKEN' 'returns FIXED or STILL_BROKEN'
 has rescue-prompt.md 'six lines' 'return contract is capped'
 
@@ -145,7 +158,7 @@ has rescue-prompt.md 'ORM migration metadata' 'regenerates migration metadata wh
 has resolver-prompt.md 'git merge --abort' 'aborts an unresolvable merge'
 has resolver-prompt.md 'RESOLVED <short merge commit SHA>' 'returns RESOLVED with the SHA'
 has resolver-prompt.md 'UNRESOLVED' 'can return UNRESOLVED'
-has resolver-prompt.md 'the most capable model available' 'resolver is most capable'
+has resolver-prompt.md 'top tier, the most capable model available' 'the resolver is top tier'
 has resolver-prompt.md 'four lines' 'return contract is capped'
 
 # --- overlap-judge-prompt.md -------------------------------------------------
@@ -159,7 +172,7 @@ has overlap-judge-prompt.md 'When you are unsure, run' 'doubt runs, not holds'
 has overlap-judge-prompt.md 'hold on the lowest' 'names one phase to hold on'
 has overlap-judge-prompt.md 'Read only. You write VERDICT_PATH and nothing else' 'is read-only'
 has overlap-judge-prompt.md 'RUN — <one-line reason>, or HOLD <M>' 'returns RUN or HOLD M'
-has overlap-judge-prompt.md 'the most capable model available' 'the judge is most capable'
+has overlap-judge-prompt.md 'top tier, the most capable model available' 'the judge is top tier'
 has overlap-judge-prompt.md 'three lines' 'return contract is capped'
 assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/overlap-judge-prompt.md" || true)" \
   'overlap-judge-prompt.md: decides a verdict, not implementation, so takes no decision policy'
@@ -214,6 +227,24 @@ has graph-prompt.md 'a mid-tier model' 'the graph agent is mid-tier'
 has graph-prompt.md 'three lines' 'return contract is capped'
 assert_eq '' "$(grep -n 'WORKTREE' "$ROOT/graph-prompt.md" || true)" \
   'graph-prompt.md: the graph agent works from the document, not a worktree'
+
+# --- platform-guide.md: model tiers ------------------------------------------
+
+exists platform-guide.md
+has platform-guide.md '| top | overlap judge, reviewer, repair, rescue, resolver' 'the top tier takes the rare, costly roles'
+has platform-guide.md '| strong | scout, phase lead' 'the strong tier takes the volume'
+has platform-guide.md '| mid-tier | worker on a task the brief marks `Tier: mechanical`' 'the mid-tier takes mechanical work'
+has platform-guide.md 'There is no cheap tier' 'no cheap tier'
+has platform-guide.md 'top=<model>, strong=<model>, mid-tier=<model>' 'the mapping has one shape'
+has platform-guide.md 'A mapping the user states in the request replaces' 'a stated mapping overrides the default'
+has platform-guide.md 'top and strong are the same model' 'a host with no higher model folds top into strong'
+has platform-guide.md 'run: models' 'a top-tier fallback is recorded in the ledger'
+has platform-guide.md '`fable` today' 'Claude Code maps the top tier to the alias above opus'
+has platform-guide.md "The session's own model does not change" 'the session model does not move the mapping'
+for t in scout-prompt.md lead-prompt.md; do
+  assert_eq '' "$(grep -n 'most capable' "$ROOT/$t" || true)" \
+    "$t: no most-capable wording left on a strong-tier role"
+done
 
 # --- rules binding on every template --------------------------------------
 

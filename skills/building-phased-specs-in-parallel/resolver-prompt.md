@@ -10,9 +10,9 @@ value before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Resolve batch BATCH_NUMBER conflicts for phase PHASE_NUMBER"
-  model: the most capable model available — this agent decides how
-         independently built phases fit together, unattended. Resolve the
-         actual model through platform-guide.md; record inheritance if
+  model: top tier, the most capable model available — this agent decides
+         how independently built phases fit together, unattended. Resolve
+         the actual model through platform-guide.md; record inheritance if
          selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of the run's integration worktree; use it for every shell working directory)

@@ -29,10 +29,11 @@ Lead's notes: LEAD_NOTES
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Phase PHASE_NUMBER: task TASK_NUMBER" (or "Phase PHASE_NUMBER: fix FINDING_IDS")
   model: the tier the brief assigns — mid-tier for a task marked
-         `Tier: mechanical`; the most capable model for a task marked
-         `Tier: standard`, for a task with no Tier line, and for every fix.
-         Resolve the actual model through platform-guide.md; record
-         inheritance if selection is unavailable.
+         `Tier: mechanical`; top tier for a task marked
+         `Tier: hard`; strong tier for a task marked `Tier: standard`, for a
+         task with no Tier line, and for every fix. Resolve the actual model
+         through platform-guide.md; record inheritance if selection is
+         unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Read applicable repository instructions. All artifact paths below are absolute.

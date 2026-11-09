@@ -53,16 +53,40 @@ artifact paths; never rely on an inherited working directory.
 
 ## Model tiers
 
-| Role | Tier |
+| Tier | Roles |
 |---|---|
-| scout, overlap judge, phase lead, reviewer, repair, rescue, resolver | most capable |
-| worker: task the brief marks `Tier: standard`, and every fix | most capable |
-| worker: task the brief marks `Tier: mechanical` | mid-tier |
-| integration verifier (gates and acceptance check, once per batch; the final check), graph agent | mid-tier |
+| top | overlap judge, reviewer, repair, rescue, resolver; worker on a task the brief marks `Tier: hard` |
+| strong | scout, phase lead; worker on a task the brief marks `Tier: standard` or gives no Tier line; every fix worker |
+| mid-tier | worker on a task the brief marks `Tier: mechanical`; integration verifier (gates and acceptance check, once per batch; the final check); graph agent |
 
-There is no cheap tier in this workflow. The scout assigns each task's tier
-under the criteria in `scout-prompt.md`; the lead applies it and does not
-downgrade a `standard` task. Fix-wave workers always use the most capable tier.
+The top tier is the most capable model the host offers. It takes the roles
+that are dispatched rarely and cost the most when they are wrong. The strong
+tier is the next model down and carries the volume: grounding, leading and
+most of the code. There is no cheap tier in this workflow.
+
+The scout assigns each task's tier under the criteria in `scout-prompt.md`.
+The lead applies it and never dispatches a task below the tier its brief
+assigns.
+
+Resolve the mapping once, before preflight, as one line:
+`top=<model>, strong=<model>, mid-tier=<model>`. That line is `MODEL_MAPPING`.
+Use it for every dispatch of the run, and name the tier's model explicitly on
+each one. The host sections below give the default; the request needs no
+model instruction. A mapping the user states in the request replaces the
+default for the tiers or roles it names; append a role exception to the line
+as `<role>=<model>`.
+
+When the host offers no model above the strong tier's,
+top and strong are the same model.
+
+When top is a different model from strong and the host refuses a dispatch on
+the top model because of the model — it is not offered, or its usage limit is
+spent — dispatch the same role again on the strong model. The controller then
+replaces the top model with the strong model everywhere in `MODEL_MAPPING`
+for the rest of the run and appends `run: models — <MODEL_MAPPING>` to the
+ledger. A lead does the same for its own dispatches and says
+`top tier unavailable` in its return; the controller treats that return as a
+refusal of its own dispatch.
 
 
 ## Check discipline and the command guard
@@ -97,10 +121,13 @@ Installation: `./install.sh` (or `./install.sh claude parallel`) links
 overrides the parent destination.
 
 Use the exposed Agent tool (Task on older hosts) with a general-purpose agent,
-the substituted template prompt, and an explicit model. Map the most capable
-tier to `opus` and the mid-tier to `sonnet`; honor a user-selected mapping
-instead. Do not use read-only agent types (Explore, Plan) for any role: the
-scout writes the brief, and verifiers write evidence.
+the substituted template prompt, and an explicit model. Map the strong tier
+to `opus` and the mid-tier to `sonnet`. Map the top tier to the alias the
+Agent tool's `model` option offers above `opus` — `fable` today — and to
+`opus` when it offers none. The session's own model does not change this
+mapping: a controller running on the top model still dispatches scouts and
+leads on `opus`. Do not use read-only agent types (Explore, Plan) for any
+role: the scout writes the brief, and verifiers write evidence.
 
 Dispatch agents in the background so several phases run at once; Claude Code
 notifies the controller as each finishes. Do not pass the Agent tool's own
@@ -170,11 +197,11 @@ workers. Tool names and fields vary by Codex surface:
   finishes.
 - With another native `spawn_agent` schema, use its declared message, model,
   context, wait, and lifecycle fields. Never pass fields from the other schema.
-- Choose the strongest available model for every most-capable role in the
-  table above, and a capable mid-tier model for the mid-tier roles. Resolve
-  actual IDs from the live tool schema or session configuration; do not
-  hard-code a model generation. If explicit model selection is unavailable,
-  inherit and record that fact.
+- Choose the strongest available model for the top tier, the next model down
+  for the strong tier, and a capable mid-tier model for the mid-tier roles in
+  the table above. Resolve actual IDs from the live tool schema or session
+  configuration; do not hard-code a model generation. If explicit model
+  selection is unavailable, inherit and record that fact.
 
 Fresh agents need a self-contained prompt: absolute worktree, template, brief
 and artifact paths; phase and base identity; return contract; and the model

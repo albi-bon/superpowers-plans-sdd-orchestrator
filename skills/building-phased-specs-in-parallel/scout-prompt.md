@@ -8,9 +8,9 @@ Substitute every uppercase placeholder value before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Ground phase PHASE_NUMBER of DESIGN_DOC_BASENAME"
-  model: the most capable model available — grounding is judgment: deciding
-         which drift matters and how to adapt to it. Resolve the actual model
-         through platform-guide.md; record inheritance if selection is unavailable.
+  model: strong tier — grounding is judgment: deciding which drift matters
+         and how to adapt to it. Resolve the actual model through
+         platform-guide.md; record inheritance if selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Platform guide: PLATFORM_GUIDE_PATH (absolute path; read it first)
@@ -135,7 +135,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - **Done when:** <observable behaviours, one per line>
     - **Test focus:** <which behaviours need tests; edge and error cases the document names>
     - **Notes:** <what you found while grounding that the worker must know>
-    - **Tier:** <mechanical or standard, under the rule below>
+    - **Tier:** <mechanical, standard or hard, under the rule below>
 
     ### - [ ] Task 2 — <title>
     …
@@ -143,8 +143,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     ## Task tier
 
+    The tier picks the model that builds the task. Every task gets exactly
+    one. A task that meets a hard statement is `hard`, even when every
+    mechanical statement is also true.
+
     Mark a task `Tier: mechanical` only when every statement below is true.
-    Otherwise mark it `Tier: standard`.
 
     - Its Notes name an existing file in the repository whose pattern the task
       copies: the same shape of change, applied to new names or data.
@@ -154,6 +157,24 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - It does not touch security, authentication, concurrency, persistence
       schemas or migrations, money, or error-recovery paths.
     - Its Done when lines are checkable by one obvious test each.
+
+    Mark a task `Tier: hard` when a wrong result is
+    likely to pass the task's own tests, which is when at least one statement
+    below is true. Most phases have no hard task.
+
+    - Its correctness depends on an ordering no single test pins down:
+      concurrency, locking, retries, idempotency, or a state machine it
+      designs.
+    - It migrates or rewrites data that already exists, so a mistake corrupts
+      data instead of failing a check.
+    - It implements the rule that decides who may do what, or that handles a
+      secret: authentication, authorization, signing, encryption.
+    - It computes money.
+    - A Drift row with a significant resolution changes what the task builds,
+      so the worker designs against something the document did not foresee.
+
+    A task that only calls such code, and does not write its logic, is not
+    hard. Mark every other task `Tier: standard`.
 
     ## Return contract
 
