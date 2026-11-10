@@ -8,9 +8,11 @@ Substitute every uppercase placeholder value before dispatching.
 ```
 Subagent (general-purpose; portable envelope — see platform-guide.md):
   description: "Ground phase PHASE_NUMBER of DESIGN_DOC_BASENAME"
-  model: strong tier — grounding is judgment: deciding which drift matters
-         and how to adapt to it. Resolve the actual model through
-         platform-guide.md; record inheritance if selection is unavailable.
+  model: strong tier, or top tier under platform-guide.md § Scout tier —
+         grounding is judgment: deciding which drift matters and how to adapt
+         to it.
+         Resolve the actual model through platform-guide.md; record
+         inheritance if selection is unavailable.
   prompt: |
     Repository: WORKTREE (absolute path of this phase's worktree; use it for every shell working directory)
     Platform guide: PLATFORM_GUIDE_PATH (absolute path; read it first)
@@ -158,9 +160,9 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
       schemas or migrations, money, or error-recovery paths.
     - Its Done when lines are checkable by one obvious test each.
 
-    Mark a task `Tier: hard` when a wrong result is
-    likely to pass the task's own tests, which is when at least one statement
-    below is true. Most phases have no hard task.
+    Mark a task `Tier: hard` when a wrong result is costly: it is
+    likely to pass the task's own tests, or later tasks are built on it. That
+    is when at least one statement below is true.
 
     - Its correctness depends on an ordering no single test pins down:
       concurrency, locking, retries, idempotency, or a state machine it
@@ -172,6 +174,9 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     - It computes money.
     - A Drift row with a significant resolution changes what the task builds,
       so the worker designs against something the document did not foresee.
+    - It designs a public interface
+      that two or more later tasks build on: their Notes or Files rely on its
+      Produces line, and that line is not a copy of an existing pattern.
 
     A task that only calls such code, and does not write its logic, is not
     hard. Mark every other task `Tier: standard`.

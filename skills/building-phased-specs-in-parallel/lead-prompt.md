@@ -78,9 +78,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     Substitute every uppercase placeholder in a template before you dispatch
     it. Name the model explicitly on every dispatch, from the model mapping:
     the mid-tier for a task worker whose brief task says `Tier: mechanical`;
-    the top tier for the reviewer and for a task worker whose brief task says
-    `Tier: hard`; the strong tier for every other task worker and every fix
-    worker. Never dispatch a task below the tier its brief assigns. When the
+    the top tier for the reviewer, for a task worker whose brief task says
+    `Tier: hard`, and for a fix worker whose findings touch a file of a
+    `Tier: hard` task, by that task's Files line; the strong tier for every
+    other task worker and fix worker.
+    Never dispatch a task below the tier its brief assigns. When the
     host refuses a top-tier dispatch because of the model, apply the platform
     guide's Model tiers section. Give each
     dispatch WORKTREE as its repository path, BASE as its base branch, and

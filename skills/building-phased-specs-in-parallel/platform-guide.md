@@ -55,18 +55,36 @@ artifact paths; never rely on an inherited working directory.
 
 | Tier | Roles |
 |---|---|
-| top | overlap judge, reviewer, repair, rescue, resolver; worker on a task the brief marks `Tier: hard` |
-| strong | scout, phase lead; worker on a task the brief marks `Tier: standard` or gives no Tier line; every fix worker |
+| top | overlap judge, reviewer, repair, rescue, resolver; scout in the cases under Scout tier below; worker on a task the brief marks `Tier: hard`; fix worker whose findings touch a file of a `Tier: hard` task |
+| strong | scout, phase lead; worker on a task the brief marks `Tier: standard` or gives no Tier line; every other fix worker |
 | mid-tier | worker on a task the brief marks `Tier: mechanical`; integration verifier (gates and acceptance check, once per batch; the final check); graph agent |
 
-The top tier is the most capable model the host offers. It takes the roles
-that are dispatched rarely and cost the most when they are wrong. The strong
-tier is the next model down and carries the volume: grounding, leading and
-most of the code. There is no cheap tier in this workflow.
+The top tier is the most capable model the host offers. It takes the work
+that costs the most when it is wrong: judgement calls on a whole phase, and
+work that later work is built on. The strong tier is the next model down and
+carries the rest of the volume: most grounding, leading and most of the code.
+There is no cheap tier in this workflow.
 
 The scout assigns each task's tier under the criteria in `scout-prompt.md`.
 The lead applies it and never dispatches a task below the tier its brief
 assigns.
+
+### Scout tier
+
+The controller dispatches the scout on the top tier when at least one
+statement below is true, and on the strong tier otherwise. It decides from the
+scheduler's action and the ledger alone.
+
+- The dispatch is a `rescout`: the phase was held, and its brief is corrected
+  against a base that moved.
+- A phase it depends on directly, by the ledger's `graph:` line, has a
+  `grounded` or `executed` ledger line that
+  counts one or more `significant`: the document no longer describes what
+  that phase built.
+- Two or more requested phases depend on it directly, by the ledger's
+  `graph:` line: what its brief gets wrong, they inherit.
+
+### The mapping
 
 Resolve the mapping once, before preflight, as one line:
 `top=<model>, strong=<model>, mid-tier=<model>`. That line is `MODEL_MAPPING`.

@@ -148,7 +148,7 @@ tier.
 
 | Dispatch | Template | Tier |
 |---|---|---|
-| scout | `scout-prompt.md` | strong |
+| scout | `scout-prompt.md` | strong; top under platform-guide.md § Scout tier |
 | overlap judge | `overlap-judge-prompt.md` | top |
 | phase lead | `lead-prompt.md` — it dispatches `worker-prompt.md` and `reviewer-prompt.md` itself | strong |
 | repair | `repair-prompt.md` | top |
@@ -157,10 +157,11 @@ tier.
 | integration verifier — gates, acceptance check and pinning, a batch's one verification; also the final check | `integration-verifier-prompt.md` | mid-tier |
 | graph agent | `graph-prompt.md` | mid-tier |
 
-The phase lead dispatches its reviewer, and a task worker whose brief task
-says `Tier: hard` on the top tier; a task worker whose brief task says
-`Tier: mechanical` on the mid-tier; every other task worker and every fix
-worker on the strong tier. When a lead's return says `top tier unavailable`,
+The phase lead dispatches
+on the top tier: its reviewer, a task worker whose brief task says `Tier: hard`,
+and a fix worker whose findings touch a file of such a task. It dispatches a
+task worker whose brief task says `Tier: mechanical` on the mid-tier, and
+every other worker on the strong tier. When a lead's return says `top tier unavailable`,
 apply platform-guide.md § Model tiers before the next dispatch. Pass
 the lead `MODEL_MAPPING`, `PLATFORM_GUIDE_PATH`, the absolute paths of both
 templates it dispatches and both policy files, and `RESUME_NOTES`: `none`, or
