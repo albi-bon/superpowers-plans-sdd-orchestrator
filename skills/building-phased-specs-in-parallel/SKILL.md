@@ -548,6 +548,8 @@ phase 6  not started (depends on 5)
 batches: 5 built, 4 landed, 1 failed (pinned)
 final check: skipped — batch 4 ran every full suite
 base feat/thing pushed at 7a8b9c0
+models: <the last `run: models` line's mapping>
+  top tier fell back to strong at <the ledger line before that one>   (only when the mapping changed)
 
 significant decisions (audit these):
   graph: built by the graph agent       (only when it was)
