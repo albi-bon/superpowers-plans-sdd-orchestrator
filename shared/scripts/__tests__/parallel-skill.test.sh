@@ -53,6 +53,7 @@ done
 has 'otherwise **3**' 'CAP defaults to 3'
 has '| `MODEL_MAPPING` | a model mapping stated in the request; otherwise the host default' 'the model mapping needs no instruction'
 has 'run: models — <MODEL_MAPPING>' 'records the model mapping in the ledger'
+has 'top tier fell back to strong at' 'the report says when the top tier fell back'
 has '| scout | `scout-prompt.md` | strong; top under platform-guide.md § Scout tier |' 'the scout is strong tier, top in the listed cases'
 has '| overlap judge | `overlap-judge-prompt.md` | top |' 'the judge is top tier'
 has '| repair | `repair-prompt.md` | top |' 'repair is top tier'
