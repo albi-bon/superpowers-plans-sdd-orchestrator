@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Land one verified integration batch on the base branch, in the main
-# checkout, record every phase it carries, and push base.
+# Land one verified integration batch on the base branch, in the base
+# worktree, record every phase it carries, and push base.
+#
+# Base is checked out in <main checkout>/.worktrees/base (phase-preflight puts
+# it there), and that is the only checkout this script moves. The main
+# checkout is the owner's: whatever branch it is on, clean or not, it is
+# neither read nor touched.
 #
 # The batch branch was built off the base tip (phase-batch saw to that) and
 # base cannot move while a batch is open, so landing is a fast-forward: base
@@ -18,8 +23,8 @@
 # Exit codes:
 #   0   landed and recorded
 #   2   usage error
-#   11  main checkout not clean
-#   13  main checkout is not on BASE
+#   11  base worktree not clean
+#   13  the base worktree is missing, or not on BASE
 #   17  the ledger already records this batch as landed (a re-run after an
 #       interruption before that line finishes the landing instead)
 #   18  the batch branch does not exist
@@ -47,27 +52,28 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   exit 2
 fi
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+basewt="$main/.worktrees/base"
 
-if [ "$(git -C "$main" branch --show-current)" != "$base" ]; then
-  echo "main checkout $main is not on base '$base' (git switch $base)" >&2
+if [ "$(git -C "$basewt" branch --show-current 2>/dev/null || true)" != "$base" ]; then
+  echo "base worktree $basewt is missing or not on base '$base': run phase-preflight again, it puts base there" >&2
   exit 13
 fi
-if [ -n "$(git -C "$main" status --porcelain)" ]; then
-  echo "main checkout not clean: landing would carry unverified changes (git status)" >&2
+if [ -n "$(git -C "$basewt" status --porcelain)" ]; then
+  echo "base worktree not clean: landing would carry unverified changes (git -C '$basewt' status)" >&2
   exit 11
 fi
 
 branch="phase-batch-$k"
-if ! git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
+if ! git -C "$basewt" show-ref --verify --quiet "refs/heads/$branch"; then
   echo "batch branch '$branch' does not exist" >&2
   exit 18
 fi
-if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit}"); then
+if ! verified_sha=$(git -C "$basewt" rev-parse --verify --quiet "$verified^{commit}"); then
   echo "verified SHA '$verified' is not a commit in this repository" >&2
   exit 19
 fi
-if [ "$(git -C "$main" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
-  echo "batch branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify it again before landing" >&2
+if [ "$(git -C "$basewt" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
+  echo "batch branch '$branch' is not at the verified $(git -C "$basewt" rev-parse --short "$verified_sha"): verify it again before landing" >&2
   exit 19
 fi
 
@@ -78,24 +84,24 @@ if [ -f "$ledger" ] && grep -q "^batch $k: landed (" "$ledger"; then
   exit 17
 fi
 
-if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
+if ! git -C "$basewt" merge-base --is-ancestor "$base" "$verified_sha"; then
   echo "base '$base' moved past what batch $k was built on: build the batch again" >&2
   exit 21
 fi
 
 landable=$("$here/phase-state" "$doc" | awk -F'\t' -v k="$k" '$1 == "batch" && $2 == k && $3 == "landable" { print $4 }')
 if [ -z "$landable" ] \
-  || [ "$(git -C "$main" rev-parse --verify --quiet "$landable^{commit}" || true)" != "$verified_sha" ]; then
-  echo "batch $k has no passing integration verification of $(git -C "$main" rev-parse --short "$verified_sha") in the ledger: verify it before landing" >&2
+  || [ "$(git -C "$basewt" rev-parse --verify --quiet "$landable^{commit}" || true)" != "$verified_sha" ]; then
+  echo "batch $k has no passing integration verification of $(git -C "$basewt" rev-parse --short "$verified_sha") in the ledger: verify it before landing" >&2
   exit 22
 fi
 
 # Re-run after an interruption, base may already be at the batch tip: the
 # fast-forward is skipped and only what the ledger lacks is recorded.
-if [ "$(git -C "$main" rev-parse HEAD)" != "$verified_sha" ]; then
-  before=$(git -C "$main" rev-parse HEAD)
-  if ! git -C "$main" merge -q --ff-only "$branch" >/dev/null 2>&1; then
-    git -C "$main" reset -q --hard "$before"
+if [ "$(git -C "$basewt" rev-parse HEAD)" != "$verified_sha" ]; then
+  before=$(git -C "$basewt" rev-parse HEAD)
+  if ! git -C "$basewt" merge -q --ff-only "$branch" >/dev/null 2>&1; then
+    git -C "$basewt" reset -q --hard "$before"
     echo "fast-forward of '$base' to '$branch' failed; base unchanged" >&2
     exit 20
   fi
@@ -105,7 +111,7 @@ fi
 # 'merge: phase <N> — …' commit on the batch's first-parent line. A member
 # the resolver left out has none.
 members=$("$here/phase-state" "$doc" | awk -F'\t' -v k="$k" '$1 == "batch" && $2 == k { print $5 }' | tr ',' ' ')
-landed=$(git -C "$main" log --first-parent --reverse --format='%h %s' "$verified_sha" \
+landed=$(git -C "$basewt" log --first-parent --reverse --format='%h %s' "$verified_sha" \
   | sed -n 's/^\([0-9a-f][0-9a-f]*\) merge: phase \([0-9][0-9]*\) — .*/\2 \1/p' \
   | awk -v m=" $members " 'index(m, " " $1 " ") { last[$1] = $2; if (!($1 in seen)) { seen[$1] = 1; order[++n] = $1 } }
       END { for (i = 1; i <= n; i++) print order[i], last[order[i]] }')
@@ -117,7 +123,7 @@ printf '%s\n' "$landed" | while read -r num merged; do
   printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
   pbranch="phase-$num-$("$here/parse-phases" "$doc" "$num" | cut -f3)"
   # Metrics are a record, not a gate: a failure here never fails the landing.
-  if metrics=$(cd "$main" && "$here/phase-metrics" "$merged" "$pbranch" 2>/dev/null); then
+  if metrics=$(cd "$basewt" && "$here/phase-metrics" "$merged" "$pbranch" 2>/dev/null); then
     printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"
   fi
   if ! "$here/phase-worktree" "$doc" "$base" remove "$num" >/dev/null 2>&1; then
@@ -125,7 +131,7 @@ printf '%s\n' "$landed" | while read -r num merged; do
   fi
 done
 
-short=$(git -C "$main" rev-parse --short HEAD)
+short=$(git -C "$basewt" rev-parse --short HEAD)
 printf 'batch %s: landed (%s)\n' "$k" "$short" >> "$ledger"
 phases=$(printf '%s\n' "$landed" | cut -d' ' -f1 | { grep . || true; } | tr '\n' ',' | sed 's/,$//; s/,/, /g')
 echo "batch $k landed on $base ($short): phase ${phases:-none}"

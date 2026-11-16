@@ -22,6 +22,12 @@
 # runs. Each skill's wrapper scripts set it, so two skills run against the same
 # spec keep separate ledgers. It must be a single plain directory name.
 #
+# PHASE_RUN_ANCHOR=main puts the directory in the repository's main checkout
+# whichever worktree the caller stands in. building-phased-specs-in-parallel
+# sets it: its controller works from the base branch's own worktree, its
+# agents from theirs, and all of them must find one ledger. Unset, the
+# directory is in the working tree the caller stands in.
+#
 # Usage: phase-run-dir DESIGN_DOC
 set -euo pipefail
 
@@ -47,6 +53,18 @@ if ! root=$(git rev-parse --show-toplevel 2>/dev/null); then
   echo "not inside a git repository: run this from the repository the phases will land in" >&2
   exit 2
 fi
+
+case "${PHASE_RUN_ANCHOR:-}" in
+  '') ;;
+  main)
+    # The first entry of 'git worktree list' is always the main checkout.
+    root=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+    ;;
+  *)
+    echo "invalid PHASE_RUN_ANCHOR: '$PHASE_RUN_ANCHOR' (unset, or 'main')" >&2
+    exit 2
+    ;;
+esac
 
 namespace=${PHASE_RUN_NAMESPACE:-phase-orchestrator}
 case "$namespace" in

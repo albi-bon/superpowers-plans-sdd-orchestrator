@@ -5,8 +5,9 @@
 #
 # Claude Code pipes the session's JSON to a status line command on stdin; the
 # directory comes from its workspace.current_dir (or cwd), else from DIR, else
-# from the working directory. A session inside a phase worktree finds the run
-# through the main checkout.
+# from the working directory. A session inside the base worktree or a phase
+# worktree finds the run through the main checkout, where the run directory
+# is.
 #
 # The run shown is the most recently written ledger under
 # .superpowers/<namespace>/ whose run has not finished (no 'RUN COMPLETE' or
@@ -73,6 +74,11 @@ doc=$(sed -n '1s/^# Phase run — spec: //p' "$best")
 base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$best")
 range=$(sed -n '2s/^# base: .*  requested: //p' "$best")
 case "$doc" in /*) ;; *) doc="$main/$doc" ;; esac
+# A ledger from before base had its own worktree names the main checkout's
+# copy, which is gone once the owner moves that checkout to another branch.
+if [ ! -f "$doc" ]; then
+  case "$doc" in "$main"/*) doc="$main/.worktrees/base/${doc#"$main"/}" ;; esac
+fi
 [ -f "$doc" ] || exit 0
 
 requested=$(cd "$main" && "$here/parse-phases" "$doc" "$range" 2>/dev/null | cut -f1 | tr '\n' ' ')

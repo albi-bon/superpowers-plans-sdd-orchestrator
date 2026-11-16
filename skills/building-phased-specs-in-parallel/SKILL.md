@@ -13,6 +13,13 @@ one batch branch off base, the combined tree is verified once, and the batch
 lands on base, which is pushed. Base only ever holds trees a verifier passed.
 The run ends with a pull request from base.
 
+**The main checkout is not the run's.** Base is checked out in a worktree of
+its own, beside the phase worktrees, and you work from there. The run never
+switches the main checkout, never needs it clean and never reads its tracked
+files: its owner keeps working in it, on any branch, while the run goes on.
+Only two git-ignored directories of the run sit inside it, `.worktrees/` and
+`.superpowers/`.
+
 Per phase, the work is `building-phased-specs`' work: a scout writes a brief, a
 phase lead has workers build it task by task, one reviewer, one fix wave, a
 verifier with an acceptance check — here run on the batch, on the tree that
@@ -61,20 +68,48 @@ authorization.
 ## Preflight
 
 Resolve `SKILL_DIR` to this skill's installed directory and `REPO_ROOT` to the
-repository's main checkout. Resolve `DESIGN_DOC` to an absolute path. Keep
-your shell working directory at `REPO_ROOT` for the whole run; agents work in
-worktrees, you never do. Quote paths and inputs.
+repository's main checkout: the first path `git worktree list` prints. Resolve
+`DESIGN_DOC` to an absolute path; the file need not exist in the main
+checkout, because preflight looks for it on `BASE`. Quote paths and inputs.
+Run preflight from any checkout of the repository:
 
 ```bash
-cd "$REPO_ROOT"
 "$SKILL_DIR/scripts/phase-preflight" "$DESIGN_DOC" "$BASE" "$RANGE"
 ```
 
 Every check must pass or the run does not start. On a non-zero exit, stop and
 show the script's stderr verbatim — it names the failed check and the command
-that fixes it. Do not work around a refusal. On success the main checkout is on
-`BASE`, every worktree of an earlier run is clean, an `origin` remote exists,
-and the ledger exists.
+that fixes it. Do not work around a refusal, and do not run that command
+yourself. When `BASE` is checked out in the main checkout, the owner frees the
+branch: the run never switches a checkout it does not own.
+
+On success `BASE` is checked out in the base worktree,
+`REPO_ROOT/.worktrees/base`, created if it was missing. The base worktree and
+every phase worktree of an earlier run are clean, an `origin` remote exists,
+and the ledger exists. The main checkout is as its owner left it. Preflight
+prints two lines to keep:
+
+| Line | Keep as |
+|---|---|
+| `base-worktree <path>` | `BASE_WORKTREE` |
+| `design-doc <path>` | `DESIGN_DOC`, replacing the path in the request |
+
+The new `DESIGN_DOC` is base's copy of the document, which stays where it is
+when the owner switches the main checkout. The run builds the document as
+committed on `BASE`. Pass that path to every script and every agent.
+
+```bash
+cd "$BASE_WORKTREE"
+```
+
+Work from `BASE_WORKTREE` for the rest of the run, and run
+no command in the main checkout again, so nothing you run can land in the
+owner's work. Every command this skill gives works from any checkout of the
+repository, so a host that resets the working directory breaks nothing: `cd`
+back before the next command. You change no file the repository tracks, in
+any worktree, `BASE_WORKTREE` included: base moves only through `phase-land`,
+and your own writes are the ledger and the report, in the run directory.
+Agents work in the worktree their dispatch names.
 
 Then the graph, the run directory and the phase records:
 
@@ -93,13 +128,14 @@ Then the graph, the run directory and the phase records:
   unreadable graph is the document's problem, and nothing has started.
 
 Append `run: invoked — cap <CAP>` and `run: models — <MODEL_MAPPING>` to the
-ledger. Keep `SKILL_DIR`, `REPO_ROOT`,
+ledger. Keep `SKILL_DIR`, `REPO_ROOT`, `BASE_WORKTREE`,
 `DESIGN_DOC`, `BASE`, `RANGE`, `CAP`, `SETUP_COMMAND`, `FULL_SUITE_POLICY`,
 `PR_TARGET`, `RUN_DIR`, the phase records and `MODEL_MAPPING`. Everything
 else belongs in the ledger.
 
 Always call the scripts through `$SKILL_DIR/scripts/`. They keep this skill's
-runs in their own run directory, `.superpowers/phase-parallel/`.
+runs in their own run directory, `.superpowers/phase-parallel/` in the main
+checkout, whichever worktree they are called from.
 
 ## The loop
 
@@ -312,8 +348,8 @@ failure it pins each failing item on a phase: a missing acceptance item on its
 phase, a failing test on the phase whose merge changed the files the test
 covers. When every failure has a pin, the batch is pinned; otherwise it is not.
 
-- **PASS** → `phase-land` fast-forwards base to the batch tip, refusing unless
-  the ledger shows that commit's `verified PASS`. It appends
+- **PASS** → `phase-land` fast-forwards base to the batch tip in `BASE_WORKTREE`,
+  refusing unless the ledger shows that commit's `verified PASS`. It appends
   `phase <N>: merged to base (<sha>)` and a `phase <N>: metrics — …` line per
   phase (platform-guide.md § Check discipline), removes the phases' worktrees,
   keeps their branches, appends `batch <K>: landed (<sha>)`, and pushes base.
@@ -336,7 +372,7 @@ When a script refuses, base is unchanged. Then:
 | `phase-batch` exit 20: a phase's merge failed without conflicts | append `phase <N>: unresolved — merge failed: <stderr>`; the batch carries on without it, and it goes to rescue |
 | `phase-land` exit 21: base moved under the batch | append `batch <K>: abandoned — base moved`; its phases queue again for a new batch |
 | `phase-land` exit 19, 20 or 22 | append `batch <K>: abandoned — <stderr>`; its phases queue again |
-| `phase-batch` exit 14, `phase-land` exit 11 or 13: the repository was changed under the run | stop and show stderr verbatim; the owner restores it and resumes |
+| `phase-batch` exit 14, `phase-land` exit 11 or 13: the repository was changed under the run — a stray batch branch, or a base worktree that is dirty, missing or off `BASE` | stop and show stderr verbatim; the owner restores it and resumes |
 
 The integration worktree is nobody's workspace outside a resolver's merge:
 `phase-batch` discards tracked changes a verifier left there, and aborts a merge
@@ -416,7 +452,7 @@ request: integration into trunk is a decision worth a human.
 Append as you go; never truncate it. Example:
 
 ```markdown
-# Phase run — spec: /repo/docs/specs/…-design.md
+# Phase run — spec: /repo/.worktrees/base/docs/specs/…-design.md
 # base: feat/thing  requested: 2-6
 
 graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)
@@ -467,8 +503,11 @@ stands.
 ## Resume
 
 Re-invoking this skill with the same spec and base **is** the resume. Preflight
-refuses a ledger that belongs to another spec or base, and a dirty main
-checkout or phase worktree. A resume may change `CAP`. Then:
+refuses a ledger that belongs to another spec or base, and a dirty base
+worktree or phase worktree. Take `BASE_WORKTREE` and `DESIGN_DOC` from its
+output again, as on a first run; the request may name the document by its path
+in the main checkout or in the base worktree, and both are the same run. A
+resume may change `CAP`. Then:
 
 - Every agent from the previous session is gone. A `dispatched` line with no
   outcome after it means: dispatch that role again. So does a
@@ -514,6 +553,12 @@ such ledgers:
   like any phase. A phase worktree left mid-merge fails preflight: the owner
   finishes or aborts that merge first.
 
+A run started before base had a worktree of its own left `BASE` checked out in
+the main checkout. Preflight refuses it and names the command: the owner moves
+the main checkout to another branch, and the next invocation resumes in the
+base worktree. Its ledger names the main checkout's copy of the document;
+preflight reads it as the same run.
+
 ## Halting
 
 Nothing halts the run outright after preflight, except the repository being
@@ -556,6 +601,7 @@ significant decisions (audit these):
   phase 3: <decision line>
 
 run directory: <run-dir>
+base worktree: <BASE_WORKTREE>
 ```
 
 Then the pull request line: `pull request: <url>` (`draft` when a requested
@@ -581,9 +627,15 @@ State these to your human partner when they matter.
    limits and spend grow with them.
 6. **One install per worktree**: the setup's disk and time, per phase, plus
    the integration worktree, which keeps its install across batches.
-7. **Nested checkouts under `.worktrees/`** are visible to tools the owner runs
-   in the main checkout during a run; test runners and file watchers may need
-   `.worktrees` excluded.
+7. **The run's directories sit inside the main checkout.** `.worktrees/` —
+   the base worktree, the integration worktree and the phase worktrees — and
+   `.superpowers/`, the run directory, are both git-ignored. Tools the owner
+   runs there see the nested checkouts; test runners and file watchers may need
+   `.worktrees` excluded. The owner may switch branches, edit and commit in
+   the main checkout during a run, but deletes neither directory, and Git
+   refuses to check out `BASE` or a phase branch there while a worktree holds
+   it. The base and integration worktrees stay after the run, for the pull
+   request's follow-up or the next run; `git worktree remove` clears them.
 8. **The run pushes.** Phase branches and base go to `origin` as the run
    progresses, and a pull request is opened at the end — a draft when a phase
    did not land or the final check failed. Nothing is merged into the target.
@@ -597,6 +649,8 @@ State these to your human partner when they matter.
 
 | Excuse | Reality |
 |--------|---------|
+| "Preflight says base is checked out in the main checkout; I'll switch it, the command is right there" | That checkout is the owner's, and may hold their work. Show the refusal and stop; the run never switches a checkout it does not own. |
+| "I'll check something in the main checkout" | It may be on any branch, mid-edit. The run's truth is the ledger, `BASE_WORKTREE` and `git log "$BASE"`. |
 | "These two phases are obviously independent, skip the overlap check" | The check costs one script call. The document's graph is the author's intent; the brief's files are what will be touched. |
 | "They share a file, hold the later one to be safe" | Shared files are integration's job. Only the judge's `HOLD` or an in-flight prerequisite holds a phase; a needless hold serialises the run. |
 | "I'll skim both briefs and judge the overlap myself" | You never read a brief. Dispatch the overlap judge; its verdict file holds the reasoning. |

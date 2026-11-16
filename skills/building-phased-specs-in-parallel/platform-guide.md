@@ -48,8 +48,12 @@ limit.
 
 Every agent works in its phase's worktree — the resolver and the integration
 verifier in the run's integration worktree, `.worktrees/integration` — never in
-the main checkout. Give each one the absolute `WORKTREE` path and absolute
-artifact paths; never rely on an inherited working directory.
+the main checkout. The controller works from the base worktree,
+`.worktrees/base`, where the base branch is checked out and batches land. The
+main checkout belongs to its owner for the whole run: nothing switches it,
+reads it or needs it clean. Give each agent the absolute `WORKTREE` path and
+absolute artifact paths; never rely on an inherited working directory — an
+agent dispatched from the base worktree inherits that one.
 
 ## Model tiers
 

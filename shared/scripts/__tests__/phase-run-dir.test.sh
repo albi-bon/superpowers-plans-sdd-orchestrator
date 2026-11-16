@@ -91,4 +91,25 @@ assert_rc 2 'outside a git repository: exits 2'
 assert_contains 'not inside a git repository' "$OUT" 'outside a repo: message names the problem'
 rm -rf "$outside"
 
+# PHASE_RUN_ANCHOR=main: the run directory lives in the main checkout whichever
+# worktree the caller stands in, so a run driven from a linked worktree and a
+# status line reading the main checkout agree on one ledger.
+git -C "$tmp" config user.email test@example.com
+git -C "$tmp" config user.name Test
+git -C "$tmp" add my-feature-design.md
+git -C "$tmp" commit -qm initial
+linked=$(cd "$(mktemp -d)" && pwd -P)
+git -C "$tmp" worktree add -q "$linked/wt" -b side
+run_in "$linked/wt" env PHASE_RUN_ANCHOR=main "$RUNDIR" "$linked/wt/my-feature-design.md"
+assert_rc 0 'anchored call from a linked worktree: exits 0'
+assert_eq "$tmp/.superpowers/phase-orchestrator/my-feature-design" "$OUT" \
+  'anchored: the run directory is the main checkout one'
+run_in "$linked/wt" "$RUNDIR" "$linked/wt/my-feature-design.md"
+assert_eq "$linked/wt/.superpowers/phase-orchestrator/my-feature-design" "$OUT" \
+  'not anchored: the run directory stays in the worktree the caller stands in'
+run_in "$tmp" env PHASE_RUN_ANCHOR=elsewhere "$RUNDIR" "$tmp/my-feature-design.md"
+assert_rc 2 'an unknown anchor: refused'
+git -C "$tmp" worktree remove --force "$linked/wt"
+rm -rf "$linked"
+
 finish
