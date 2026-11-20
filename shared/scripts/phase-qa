@@ -15,18 +15,77 @@
 #             (created, or re-attached with tracked changes discarded; a
 #             branch that holds no fix yet follows base), record
 #             'qa: opened — <branch> at <sha>', print 'opened <sha>'
+#   next      print the one action the ledger allows next; write nothing
+#   close     append 'qa: done — <summary>', counted from the ledger, and
+#             print it
+#   status    print the pass's stage for the status line, '<stage>' or
+#             '<stage><TAB><done><TAB><total>', or nothing when no pass is
+#             active; write nothing, always exit 0
+#
+# The ledger lines of the pass, written by this script and the controller:
+#   run: qa scope — <none|top N|all|focus: words>
+#   qa: opened — <branch> at <sha>
+#   qa: flows defined — <n> found, selected <list>, not walkable <list>, parallel <yes|no>
+#   qa flow <F>: walked — <n> findings
+#   qa flow <F>: not walked — <why>
+#   qa: triaged — <n> findings, fix <G1@2 G3@2,5 …|->, <n> spec, <n> outside this run
+#   qa group <G>: fixed <sha>
+#   qa group <G>: not fixed — <reason>
+#   qa: verified PASS — <sha>
+#   qa: verified FAIL — <reason>
+#   qa: landed (<sha>)
+#   qa: not landed — <reason>
+#   qa flow <F>: rechecked — G1 confirmed, G3 still broken, <n> new
+#   qa: done — <summary>
+#   qa: skipped — <reason>
+# Lists are comma-separated numbers, or '-'; spaces after the commas are
+# ignored. In the triaged line each fix group names the flows its findings
+# came from, in fix order. '<role> dispatched' lines are progress markers and
+# never change what comes next.
+#
+# 'next' prints the first of these that applies. A 'qa: skipped' line is
+# superseded when a 'batch <K>: landed', 'run: final check' or 'run: qa scope'
+# line follows it: what the skip was decided on has changed. QA lines up to
+# the last superseded skip are ignored.
+#    1  no scope recorded, or scope 'none'            done
+#    2  'qa: done' recorded                           done
+#    3  a skip that is not superseded                 done
+#    4  no flows defined, a requested phase is not
+#       merged                                        skip phase <N> did not land
+#    5  no flows defined, the last final check failed skip the final check failed
+#    6  no flows defined, no 'opened' line since the
+#       last landed batch                             open
+#    7  no flows defined                              plan
+#    8  a batch landed after the flows were defined   close
+#    9  selected, walkable flows without an outcome   walk <F> [<F>…]
+#   10  not triaged, no findings                      close
+#   11  not triaged                                   triage
+#   12  a fix group without an outcome                fix <G>
+#   13  no group was fixed                            close
+#   14  gates failed or the landing was refused, and
+#       the QA branch is not pushed since             push
+#   15  gates failed or the landing was refused       close
+#   16  not verified                                  verify <sha of the last fix>
+#   17  not landed                                    land <verified sha>
+#   18  flows of fixed groups not re-checked          recheck <F> [<F>…]
+#   19  otherwise                                     close
+# With 'parallel no', walk and recheck name one flow at a time. Like
+# phase-schedule, next prints an action whether or not its agent is already
+# out. Every stage has one outcome line and no rule leads back to a stage
+# that has one: that is what bounds the pass to one round.
 #
 # Exit codes:
 #   0   done
 #   2   usage error, or no ledger
 #   14  open: the QA branch exists and the ledger does not account for it
-#   17  open: a batch is still open
+#   17  open: a batch is still open; close: 'qa: done' is already recorded
+#   18  close: the pass is not over
 #
-# Usage: phase-qa DESIGN_DOC BASE open
+# Usage: phase-qa DESIGN_DOC BASE open|next|close|status
 set -euo pipefail
 
 usage() {
-  echo "usage: phase-qa DESIGN_DOC BASE open" >&2
+  echo "usage: phase-qa DESIGN_DOC BASE open|next|close|status" >&2
   exit 2
 }
 
@@ -36,9 +95,15 @@ base=$2
 sub=$3
 shift 3
 case "$sub" in
-  open) [ "$#" -eq 0 ] || usage ;;
+  open | next | close | status) [ "$#" -eq 0 ] || usage ;;
   *) usage ;;
 esac
+# The status line calls 'status' on every refresh: whatever goes wrong, it
+# prints nothing more and exits 0.
+if [ "$sub" = status ]; then
+  exec 2>/dev/null
+  trap 'exit 0' EXIT
+fi
 
 here=$(cd "$(dirname "$0")" && pwd)
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -82,7 +147,229 @@ reset_tracked() {
   fi
 }
 
+# The lowest requested phase that is not merged, if any.
+unmerged_phase() {
+  local range state n
+  range=$(sed -n '2s/^# base: .*  requested: //p' "$ledger")
+  state=$("$here/phase-state" "$doc")
+  for n in $("$here/parse-phases" "$doc" "$range" | cut -f1); do
+    if ! printf '%s\n' "$state" | awk -F'\t' -v n="$n" '$1 == n && $2 == "merged" { f = 1 } END { exit !f }'; then
+      echo "$n"
+      return 0
+    fi
+  done
+}
+
+# One reading of the ledger for every subcommand. MODE picks what is printed:
+# 'next' the action, 'status' the stage, 'close' the summary of the done line.
+# shellcheck disable=SC2016 # an awk program, not a shell string
+PARSE='
+  function clean(s) { gsub(/[ \t]/, "", s); return (s == "-") ? "" : s }
+  function between(s, a, b,   i, j, t) {
+    i = index(s, a)
+    if (!i) return ""
+    t = substr(s, i + length(a))
+    if (b == "") return t
+    j = index(t, b)
+    return j ? substr(t, 1, j - 1) : t
+  }
+  function lastword(s,   k, w) { k = split(s, w, " "); return w[k] }
+  function sortnum(arr, cnt,   a, b, v) {
+    for (a = 2; a <= cnt; a++) {
+      v = arr[a]; b = a - 1
+      while (b >= 1 && arr[b] + 0 > v + 0) { arr[b + 1] = arr[b]; b-- }
+      arr[b + 1] = v
+    }
+  }
+  /^run: qa scope — / { scope = $0; sub(/^run: qa scope — /, "", scope); scopenr = NR; next }
+  /^run: final check / {
+    if ($0 !~ / dispatched$/) { finalnr = NR; finalfail = ($0 ~ /^run: final check FAIL/) }
+    next
+  }
+  /^batch [0-9]+: landed/ { landnr = NR; next }
+  index($0, "push: " branch " ") == 1 { pushnr = NR; next }
+  /^qa: / || /^qa flow [0-9]+: / || /^qa group [0-9]+: / {
+    if ($0 !~ / dispatched$/) { q[++qn] = $0; qnr[qn] = NR }
+    next
+  }
+  function read(   i, l, nr, body, f, g, t, n, j, tok, c) {
+    epoch = 0
+    for (i = 1; i <= qn; i++)
+      if (q[i] ~ /^qa: skipped/ && (landnr > qnr[i] || finalnr > qnr[i] || scopenr > qnr[i])) epoch = qnr[i]
+    for (i = 1; i <= qn; i++) {
+      if (qnr[i] <= epoch) continue
+      l = q[i]; nr = qnr[i]
+      if (l ~ /^qa: opened — /) { openednr = nr; openedsha = lastword(l) }
+      else if (l ~ /^qa: skipped/) { skipped = 1; skipreason = l; sub(/^qa: skipped — /, "", skipreason) }
+      else if (l ~ /^qa: flows defined — /) {
+        flowsnr = nr
+        body = l; sub(/^qa: flows defined — /, "", body)
+        found = body + 0
+        nsel = split(clean(between(body, ", selected ", ", not walkable ")), sel, ",")
+        n = split(clean(between(body, ", not walkable ", ", parallel ")), t, ",")
+        for (j = 1; j <= n; j++) if (t[j] != "") unwalkable[t[j]] = 1
+        parallel = clean(between(body, ", parallel ", ""))
+      }
+      else if (l ~ /^qa flow [0-9]+: /) {
+        f = l; sub(/^qa flow /, "", f); sub(/:.*$/, "", f)
+        body = l; sub(/^qa flow [0-9]+: /, "", body)
+        if (body ~ /^walked — /) {
+          c = body; sub(/^walked — /, "", c)
+          if (!(f in fout)) nwalked++
+          fout[f] = "walked"; findings += c + 0
+        }
+        else if (body ~ /^not walked/) { fout[f] = "not"; fwhy[f] = body; sub(/^not walked — /, "", fwhy[f]) }
+        else if (body ~ /^rechecked — /) {
+          rechecked[f] = 1
+          sub(/^rechecked — /, "", body)
+          n = split(body, t, /, */)
+          for (j = 1; j <= n; j++) {
+            tok = t[j]
+            if (tok ~ /^G[0-9]+ confirmed/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); confirmed[g] = 1 }
+            else if (tok ~ /^G[0-9]+ still broken/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); broken[g] = 1 }
+            else if (tok ~ /^[0-9]+ new/) newcount += tok + 0
+          }
+        }
+      }
+      else if (l ~ /^qa: triaged — /) {
+        triaged = 1
+        body = l; sub(/^qa: triaged — /, "", body)
+        t[1] = between(body, ", fix ", " spec")
+        speccount = lastword(t[1]) + 0
+        sub(/, *[0-9]+$/, "", t[1])
+        gsub(/, +/, ",", t[1])
+        outside = between(body, " spec, ", "") + 0
+        n = split(t[1], tok_, " ")
+        for (j = 1; j <= n; j++) {
+          if (tok_[j] !~ /^G[0-9]+@/) continue
+          g = tok_[j]; sub(/^G/, "", g); sub(/@.*$/, "", g)
+          f = tok_[j]; sub(/^G[0-9]+@/, "", f)
+          group[++ngroups] = g; gflows[g] = f
+        }
+      }
+      else if (l ~ /^qa group [0-9]+: /) {
+        g = l; sub(/^qa group /, "", g); sub(/:.*$/, "", g)
+        body = l; sub(/^qa group [0-9]+: /, "", body)
+        if (body ~ /^fixed /) { gout[g] = "fixed"; lastfix = lastword(body) }
+        else if (body ~ /^not fixed/) { gout[g] = "not"; greason[g] = body; sub(/^not fixed — /, "", greason[g]) }
+      }
+      else if (l ~ /^qa: verified PASS/) { verdict = "PASS"; vsha = lastword(l) }
+      else if (l ~ /^qa: verified FAIL/) { verdict = "FAIL"; failnr = nr }
+      else if (l ~ /^qa: landed \(/) landed = 1
+      else if (l ~ /^qa: not landed/) { notlanded = 1; failnr = nr }
+      else if (l ~ /^qa: done/) done = 1
+    }
+    # What is left to walk, fix and re-check.
+    for (i = 1; i <= nsel; i++) {
+      f = sel[i]
+      if (f == "" || (f in unwalkable)) continue
+      walkable++
+      if (f in fout) walkdone++
+      else towalk[++ntowalk] = f
+    }
+    for (i = 1; i <= ngroups; i++) {
+      g = group[i]
+      if (gout[g] == "fixed") {
+        nfixed++
+        n = split(gflows[g], t, ",")
+        for (j = 1; j <= n; j++) if (t[j] != "" && !(t[j] in rflow)) { rflow[t[j]] = 1; rlist[++nrlist] = t[j] }
+      }
+      else if (gout[g] == "not") nnotfixed++
+      else if (nextgroup == "") nextgroup = g
+    }
+    sortnum(rlist, nrlist)
+    for (i = 1; i <= nrlist; i++) {
+      if (rlist[i] in rechecked) recheckdone++
+      else torecheck[++ntorecheck] = rlist[i]
+    }
+    unlanded = (verdict == "FAIL" || notlanded)
+  }
+  function flowlist(arr, cnt,   i, out) {
+    if (parallel == "no") return arr[1]
+    for (i = 1; i <= cnt; i++) out = out (i > 1 ? " " : "") arr[i]
+    return out
+  }
+  # Sets action, and stage with its progress, by the rules in the header.
+  function decide() {
+    stage = ""
+    if (scope == "" || scope == "none") { action = "done"; return }
+    if (done) { action = "done"; return }
+    if (skipped) { action = "done"; return }
+    if (!flowsnr) {
+      if (unmerged != "") { action = "skip phase " unmerged " did not land"; return }
+      if (finalfail) { action = "skip the final check failed"; return }
+      if (openednr) stage = "planning"
+      action = (openednr > landnr + 0) ? "plan" : "open"
+      return
+    }
+    if (landnr > flowsnr) { action = "close"; abandoned = 1; return }
+    if (ntowalk) { action = "walk " flowlist(towalk, ntowalk); stage = "walking\t" (walkdone + 0) "\t" walkable; return }
+    if (!triaged) {
+      if (findings + 0 == 0) { action = "close"; return }
+      action = "triage"; stage = "triaging"; return
+    }
+    if (nextgroup != "") {
+      action = "fix " nextgroup; stage = "fixing\t" (nfixed + nnotfixed + 0) "\t" ngroups; return
+    }
+    if (!nfixed) { action = "close"; return }
+    if (unlanded) { action = (pushnr > failnr) ? "close" : "push"; return }
+    if (verdict == "") { action = "verify " lastfix; stage = "verifying"; return }
+    if (!landed) { action = "land " vsha; stage = "landing"; return }
+    if (ntorecheck) {
+      action = "recheck " flowlist(torecheck, ntorecheck)
+      stage = "rechecking\t" (recheckdone + 0) "\t" nrlist; return
+    }
+    action = "close"
+  }
+  function summary(   i, g, c, b, out) {
+    if (abandoned) return "abandoned, base moved under the pass"
+    if (!nwalked) return "nothing to walk"
+    if (!triaged) return nwalked " flows walked, no findings"
+    if (!unlanded)
+      for (i = 1; i <= ngroups; i++) {
+        g = group[i]
+        if (gout[g] != "fixed") continue
+        if (g in broken) b++
+        else if (g in confirmed) c++
+      }
+    out = (c + 0) " confirmed, " (b + 0) " still broken, " (nnotfixed + 0) " not fixed, " (newcount + 0) " new, " (speccount + 0) " spec"
+    if (unlanded && nfixed) out = out ", " nfixed " fixed but not landed"
+    return out
+  }
+  END {
+    read()
+    decide()
+    if (mode == "next") print action
+    else if (mode == "status") { if (stage != "") print stage }
+    else if (mode == "close") {
+      if (done) print "!done"
+      else if (action != "close") print "!open"
+      else print summary()
+    }
+  }
+'
+compute() { # compute MODE
+  awk -v mode="$1" -v branch="$branch" -v unmerged="$(unmerged_phase)" "$PARSE" "$ledger"
+}
+
 case "$sub" in
+  next) compute next ;;
+  status) compute status ;;
+  close)
+    line=$(compute close)
+    case "$line" in
+      '!done')
+        echo "the QA pass is already closed: the ledger has a 'qa: done' line" >&2
+        exit 17
+        ;;
+      '!open')
+        echo "the QA pass is not over: phase-qa next says '$(compute next)'" >&2
+        exit 18
+        ;;
+    esac
+    printf 'qa: done — %s\n' "$line" >> "$ledger"
+    printf 'qa: done — %s\n' "$line"
+    ;;
   open)
     ob=$(open_batch)
     if [ -n "$ob" ]; then
