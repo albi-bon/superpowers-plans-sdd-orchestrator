@@ -10,17 +10,37 @@
 # runs before the run directory is created, so it cannot observe its own side
 # effects.
 #
+# PHASE_BASE_CHECKOUT=worktree (building-phased-specs-in-parallel sets it)
+# keeps the base branch in a worktree of its own instead,
+# <main checkout>/.worktrees/base, and leaves the main checkout to its owner:
+# it is never switched and never has to be clean. In that mode:
+#   - the base worktree is created, or re-attached, or moved to BASE when an
+#     earlier run left it on another base; it must be clean (exit 11);
+#   - BASE checked out anywhere else is refused (exit 13): the script will not
+#     switch a checkout it does not own;
+#   - the run reads the design document from base, so the main checkout can
+#     change branch mid-run. DESIGN_DOC may name the copy in any checkout of
+#     the repository; a copy that is not committed on base, or on a fresh run
+#     differs from base's, is refused (exit 26). A git-ignored document, or
+#     one outside the repository, is read where it is;
+#   - two more lines are printed, for the controller to keep:
+#       base-worktree <absolute path>
+#       design-doc <absolute path of the document to use from here on>
+#
 # Exit codes:
 #   0   ok
 #   2   usage error, unreadable design document, or malformed range
 #   3   the design document contains no phase headings
 #   4   a requested phase number is absent from the document
 #   10  not inside a git repository
-#   11  working tree not clean
+#   11  working tree not clean (worktree mode: the base worktree)
 #   12  the base branch is main or master
-#   13  the base branch could not be resolved or created
+#   13  the base branch could not be resolved or created (worktree mode: or
+#       it is checked out outside the base worktree)
 #   14  a phase branch exists that this run's ledger does not account for
 #   15  the run ledger belongs to another spec or base
+#   26  worktree mode: the design document is not committed on base, or
+#       differs from base's copy on a fresh run
 #
 # Runtime capabilities and permissions are checked by the controller; this
 # script only checks repository state. See platform-guide.md.
@@ -39,7 +59,18 @@ range=$3
 
 here=$(cd "$(dirname "$0")" && pwd)
 
-if [ ! -f "$doc" ]; then
+mode=${PHASE_BASE_CHECKOUT:-current}
+case "$mode" in
+  current | worktree) ;;
+  *)
+    echo "invalid PHASE_BASE_CHECKOUT: '$mode' (unset, or 'worktree')" >&2
+    exit 2
+    ;;
+esac
+
+# In worktree mode the document may be absent from the checkout it was named
+# in and still be on base, so its existence is settled further down.
+if [ "$mode" = current ] && [ ! -f "$doc" ]; then
   echo "no such design document: $doc" >&2
   exit 2
 fi
@@ -57,7 +88,103 @@ case "$base" in
     ;;
 esac
 
-if [ -n "$(git status --porcelain)" ]; then
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+registered() { # registered PATH — is a worktree registered at PATH?
+  git worktree list --porcelain | grep -qx "worktree $1"
+}
+
+# What the rest of the script reads: the document to parse now, and the path
+# the ledger and the controller keep.
+parse_doc=$doc
+canon=""
+fresh_check=""
+
+if [ "$mode" = worktree ]; then
+  # The first entry of 'git worktree list' is always the main checkout.
+  main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  basewt="$main/.worktrees/base"
+
+  # Base is created off trunk when it does not exist yet, so trunk's copy of
+  # the document is the one a new base starts with.
+  start=""
+  if git show-ref --verify --quiet "refs/heads/$base"; then
+    start=$base
+  else
+    for candidate in main master; do
+      if git show-ref --verify --quiet "refs/heads/$candidate"; then
+        start=$candidate
+        break
+      fi
+    done
+    if [ -z "$start" ]; then
+      echo "base branch '$base' does not exist, and neither 'main' nor 'master' exists to create it from" >&2
+      echo "create it yourself: git branch $base <start-point>" >&2
+      exit 13
+    fi
+  fi
+
+  held=$(git worktree list --porcelain | awk -v want="branch refs/heads/$base" '
+    /^worktree / { path = substr($0, 10) }
+    $0 == want { print path }')
+  if [ -n "$held" ] && [ "$held" != "$basewt" ] && [ -d "$held" ]; then
+    echo "base '$base' is checked out in $held." >&2
+    echo "this run keeps '$base' in a worktree of its own, $basewt, and switches no other checkout." >&2
+    echo "free the branch first: git -C '$held' switch <another-branch>   (or: git -C '$held' switch --detach)" >&2
+    exit 13
+  fi
+
+  # The document's path inside the repository, whichever checkout it was
+  # named in. The directory may be gone from a checkout that changed branch,
+  # so the prefixes of the two checkouts the run knows are tried as text too.
+  docdir=$(dirname "$doc")
+  if [ -d "$docdir" ]; then
+    given="$(cd "$docdir" && pwd -P)/$(basename "$doc")"
+  else
+    case "$doc" in
+      /*) given=$doc ;;
+      *) given="$(pwd -P)/$doc" ;;
+    esac
+  fi
+  rel=""
+  if [ -d "$docdir" ] && top=$(git -C "$docdir" rev-parse --show-toplevel 2>/dev/null) \
+    && [ "$(git -C "$docdir" worktree list --porcelain | sed -n '1s/^worktree //p')" = "$main" ]; then
+    rel=${given#"$top"/}
+  else
+    case "$given" in
+      "$basewt"/*) rel=${given#"$basewt"/} ;;
+      "$main"/*) rel=${given#"$main"/} ;;
+    esac
+  fi
+
+  if [ -n "$rel" ] && git cat-file -e "$start:$rel" 2>/dev/null; then
+    canon="$basewt/$rel"
+    mkdir -p "$tmpdir/doc"
+    parse_doc="$tmpdir/doc/$(basename "$rel")"
+    git show "$start:$rel" > "$parse_doc"
+    if [ -f "$given" ] && [ "$given" != "$canon" ] \
+      && [ "$(git -C "$(dirname "$given")" hash-object "$(basename "$given")")" != "$(git rev-parse "$start:$rel")" ]; then
+      fresh_check="the design document at $given differs from '$rel' on '$start', which is what the run builds from.
+commit your version on '$start' first (git add, git commit), or restore the committed one"
+    fi
+  elif [ ! -f "$given" ]; then
+    echo "no such design document: $doc" >&2
+    exit 2
+  elif [ -n "$rel" ] && ! git -C "$(dirname "$given")" check-ignore -q "$given"; then
+    echo "the design document '$rel' is not committed on '$start'." >&2
+    echo "the run reads it from '$base', in a worktree of its own: commit it on '$start' first (git add '$rel' && git commit)" >&2
+    exit 26
+  else
+    canon=$given
+    parse_doc=$given
+  fi
+
+  if registered "$basewt" && [ -d "$basewt" ] && [ -n "$(git -C "$basewt" status --porcelain)" ]; then
+    echo "base worktree not clean: $basewt — commit or discard what is there before starting a run (git -C '$basewt' status)" >&2
+    exit 11
+  fi
+elif [ -n "$(git status --porcelain)" ]; then
   echo "working tree not clean: commit or stash before starting a run (git status)" >&2
   exit 11
 fi
@@ -66,7 +193,7 @@ fi
 # its exit code straight through, so the two scripts can never disagree about
 # which phases a range names.
 set +e
-selected=$("$here/parse-phases" "$doc" "$range" 2>&1)
+selected=$("$here/parse-phases" "$parse_doc" "$range" 2>&1)
 rc=$?
 set -e
 if [ "$rc" -ne 0 ]; then
@@ -74,34 +201,57 @@ if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi
 
-rundir=$("$here/phase-run-dir" "$doc")
+rundir=$("$here/phase-run-dir" "$parse_doc")
 ledger="$rundir/run.md"
 # Preserve existing run directories, but never reuse a basename collision or
 # a run on a different base. Resolve relative ledger paths from the repo root.
 root=$(git rev-parse --show-toplevel)
-docpath=$(cd "$(dirname "$doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$doc")")
+if [ "$mode" = worktree ]; then
+  docpath=$canon
+else
+  docpath=$(cd "$(dirname "$doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$doc")")
+fi
+# In worktree mode a document is the same one whichever checkout its path
+# runs through: a ledger written when base lived in the main checkout names
+# the main checkout's copy, and is still this run's.
+in_repo() {
+  case "$1" in
+    "$basewt"/*) printf '%s\n' "${1#"$basewt"/}" ;;
+    "$main"/*) printf '%s\n' "${1#"$main"/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
 if [ -f "$ledger" ]; then
   saved_doc=$(sed -n '1s/^# Phase run — spec: //p' "$ledger")
   saved_base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$ledger")
-  case "$saved_doc" in
-    /*) ;;
-    *) saved_doc="$root/$saved_doc" ;;
-  esac
-  saved_path=""
-  if [ -f "$saved_doc" ]; then
-    saved_path=$(cd "$(dirname "$saved_doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$saved_doc")")
+  if [ "$mode" = worktree ]; then
+    saved_path=$(in_repo "$saved_doc")
+    docpath_id=$(in_repo "$docpath")
+  else
+    case "$saved_doc" in
+      /*) ;;
+      *) saved_doc="$root/$saved_doc" ;;
+    esac
+    saved_path=""
+    if [ -f "$saved_doc" ]; then
+      saved_path=$(cd "$(dirname "$saved_doc")" && printf '%s/%s' "$(pwd -P)" "$(basename "$saved_doc")")
+    fi
+    docpath_id=$docpath
   fi
-  if [ "$saved_path" != "$docpath" ] || [ "$saved_base" != "$base" ]; then
+  if [ "$saved_path" != "$docpath_id" ] || [ "$saved_base" != "$base" ]; then
     echo "run ledger belongs to a different spec or base: $ledger" >&2
     echo "resume with its original spec and base, or move the run directory aside before starting a separate run" >&2
     exit 15
   fi
+elif [ -n "$fresh_check" ]; then
+  # A resumed run skips this: base's copy legitimately moves as phases land.
+  printf '%s\n' "$fresh_check" >&2
+  exit 26
 fi
 
 # A phase branch for a requested phase is in-flight work only if this spec's
 # ledger accounts for it. Anything else has unknown provenance and is refused.
-tmpsel=$(mktemp)
-trap 'rm -f "$tmpsel"' EXIT
+tmpsel="$tmpdir/selected"
 printf '%s\n' "$selected" > "$tmpsel"
 
 while IFS="$(printf '\t')" read -r num _ slug; do
@@ -121,7 +271,36 @@ while IFS="$(printf '\t')" read -r num _ slug; do
   exit 14
 done < "$tmpsel"
 
-if git show-ref --verify --quiet "refs/heads/$base"; then
+if [ "$mode" = worktree ]; then
+  # Every refusal is behind us: put base in its worktree. Only this worktree
+  # is ever created or switched; it is the run's own.
+  if registered "$basewt" && [ -d "$basewt" ]; then
+    if [ "$(git -C "$basewt" branch --show-current)" != "$base" ]; then
+      if [ "$start" = "$base" ]; then
+        set -- switch -q "$base"
+      else
+        set -- switch -q -c "$base" "$start"
+      fi
+      if ! git -C "$basewt" "$@" >/dev/null 2>&1; then
+        echo "could not put the base worktree $basewt on '$base' (git -C '$basewt' $*)" >&2
+        exit 13
+      fi
+    fi
+  else
+    git worktree prune
+    mkdir -p "$main/.worktrees"
+    printf '*\n' > "$main/.worktrees/.gitignore"
+    if [ "$start" = "$base" ]; then
+      set -- worktree add -q "$basewt" "$base"
+    else
+      set -- worktree add -q -b "$base" "$basewt" "$start"
+    fi
+    if ! git "$@" >/dev/null 2>&1; then
+      echo "could not create the base worktree for '$base' (git $*)" >&2
+      exit 13
+    fi
+  fi
+elif git show-ref --verify --quiet "refs/heads/$base"; then
   if ! git switch "$base" >/dev/null 2>&1; then
     echo "could not switch to base branch '$base' (git switch $base)" >&2
     exit 13
@@ -153,3 +332,7 @@ fi
 
 numbers=$(printf '%s\n' "$selected" | cut -f1 | tr '\n' ',' | sed 's/,$//')
 echo "preflight ok: base $base, phases $numbers, run-dir $rundir"
+if [ "$mode" = worktree ]; then
+  echo "base-worktree $basewt"
+  echo "design-doc $docpath"
+fi

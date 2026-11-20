@@ -77,6 +77,16 @@ wt=$(cd "$repo" && "$WT" "$repo/spec.md" feat/x start 7)
 line "$wt"
 assert_contains 'feat/x · 1/7 merged' "$OUT" 'a session inside a phase worktree finds the run in the main checkout'
 
+# The owner moves the main checkout to a branch without the spec: the run is
+# still shown, read from base's copy in the base worktree.
+git -C "$repo" worktree add -q "$repo/.worktrees/base" -b feat/base-copy feat/x
+git -C "$repo" rm -q spec.md
+git -C "$repo" commit -qm 'the main checkout moves on'
+line "$repo"
+assert_contains 'feat/x · 1/7 merged' "$OUT" 'the main checkout lost the spec: the run is found through the base worktree'
+line "$repo/.worktrees/base"
+assert_contains 'feat/x · 1/7 merged' "$OUT" 'a session inside the base worktree finds the run'
+
 log 'RUN COMPLETE — phases 1–7 of spec.md'
 line "$repo"
 assert_eq '' "$OUT" 'a finished run is not shown'

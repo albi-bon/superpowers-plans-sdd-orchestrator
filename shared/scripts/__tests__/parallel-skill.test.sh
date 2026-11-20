@@ -46,8 +46,25 @@ assert_eq 'no' "$([ -e "$ROOT/verifier-prompt.md" ] && echo yes || echo no)" \
   'no separate phase verifier template: the integration verifier is the one verification'
 for f in phase-start phase-finish phase-integrate; do
   assert_eq 'no' "$([ -e "$ROOT/scripts/$f" ] && echo yes || echo no)" \
-    "no $f wrapper: it would switch the main checkout off base, or integrate one phase alone"
+    "no $f wrapper: it would switch a checkout off base, or integrate one phase alone"
 done
+
+# --- base in a worktree of its own; the main checkout left to its owner ---------
+
+has '**The main checkout is not the run' 'states that the main checkout is not part of the run'
+has '`REPO_ROOT/.worktrees/base`' 'names where the base worktree is'
+has '| `base-worktree <path>` | `BASE_WORKTREE` |' 'keeps the base worktree preflight prints'
+has '| `design-doc <path>` | `DESIGN_DOC`, replacing the path in the request' "switches to base's copy of the document"
+has 'cd "$BASE_WORKTREE"' 'works from the base worktree'
+has 'no command in the main checkout' 'runs nothing in the main checkout'
+has 'never switches a checkout it does not own' 'does not free base itself when preflight refuses'
+has 'fast-forwards base to the batch tip in `BASE_WORKTREE`' 'batches land in the base worktree'
+has 'a dirty base
+worktree or phase worktree' 'resume: preflight checks the base worktree, not the main checkout'
+has 'before base had a worktree of its own' 'resumes a run that kept base in the main checkout'
+has 'base worktree: <BASE_WORKTREE>' 'the report says where the base worktree is'
+assert_eq '' "$(grep -n 'main checkout is on' "$SKILL" || true)" 'no claim left that the main checkout is on base'
+assert_eq '' "$(grep -n 'directory at `REPO_ROOT`' "$SKILL" || true)" 'the controller no longer works from the main checkout'
 
 # --- invocation, scheduling, integration, ladder, drain ------------------------
 
@@ -180,19 +197,44 @@ assert_rc 16 'preflight wrapper: refuses a repository with no origin remote'
 assert_contains 'git remote add origin' "$OUT" 'preflight wrapper: says how to add one'
 git init -q --bare "$repo.origin"
 git -C "$repo" remote add origin "$repo.origin"
+printf 'work in progress\n' > "$repo/wip.txt"
 run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
-assert_rc 0 'preflight wrapper: a fresh run passes'
+assert_rc 0 'preflight wrapper: a fresh run passes, whatever the main checkout holds'
 assert_eq 'yes' "$([ -f "$repo/.superpowers/phase-parallel/spec/run.md" ] && echo yes || echo no)" \
-  'preflight wrapper: the ledger lives in the phase-parallel namespace'
-run_in "$ROOT/scripts/parse-deps" --write "$repo/spec.md"
+  'preflight wrapper: the ledger lives in the phase-parallel namespace, in the main checkout'
+bw="$repo/.worktrees/base"
+spec="$bw/spec.md"
+assert_contains "base-worktree $bw" "$OUT" 'preflight wrapper: prints the base worktree'
+assert_contains "design-doc $spec" "$OUT" "preflight wrapper: prints base's copy of the document"
+assert_eq 'feat/x' "$(git -C "$bw" branch --show-current 2>/dev/null)" 'preflight wrapper: base is checked out in its own worktree'
+assert_eq 'main' "$(git -C "$repo" branch --show-current)" 'preflight wrapper: the main checkout is not switched'
+assert_eq '?? wip.txt' "$(git -C "$repo" status --porcelain)" 'preflight wrapper: the main checkout keeps its work in progress'
+
+# From here on the controller works from the base worktree, with base's copy
+# of the document; every wrapper still finds the one run directory.
+run_in() { set +e; OUT=$(cd "$bw" && "$@" 2>&1); RC=$?; set -e; }
+run_in "$ROOT/scripts/phase-run-dir" "$spec"
+assert_eq "$repo/.superpowers/phase-parallel/spec" "$OUT" 'run-dir wrapper: the main checkout run directory, from the base worktree'
+run_in "$ROOT/scripts/parse-deps" --write "$spec"
 assert_eq 'graph: 1→{} 2→{} (source: line)' "$OUT" 'parse-deps wrapper: graph recorded'
-run_in "$ROOT/scripts/phase-schedule" "$repo/spec.md" feat/x all 3
+assert_eq 'yes' "$([ -f "$repo/.superpowers/phase-parallel/spec/graph.tsv" ] && echo yes || echo no)" \
+  'parse-deps wrapper: the graph is written beside the ledger'
+run_in "$ROOT/scripts/phase-schedule" "$spec" feat/x all 3
 assert_eq "$(printf 'start 1\nstart 2\nwait')" "$OUT" 'schedule wrapper: independent phases start together'
-run_in "$ROOT/scripts/phase-worktree" "$repo/spec.md" feat/x start 1
+run_in "$ROOT/scripts/phase-worktree" "$spec" feat/x start 1
 wt=$OUT
+assert_eq "$repo/.worktrees/phase-1-one" "$wt" 'worktree wrapper: phase worktrees sit beside the base worktree'
+assert_eq '' "$(git -C "$bw" status --porcelain)" 'the base worktree holds no run files'
 printf 'left behind\n' > "$wt/stray.txt"
-run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
+run_in "$ROOT/scripts/phase-preflight" "$spec" feat/x all
 assert_rc 11 'preflight wrapper: refuses a dirty phase worktree'
 assert_contains "$wt" "$OUT" 'preflight wrapper: names the dirty worktree'
+rm "$wt/stray.txt"
+git -C "$repo" switch -q -c elsewhere
+git -C "$repo" rm -q spec.md
+git -C "$repo" commit -qm 'the owner moves the main checkout on'
+run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
+assert_rc 0 'preflight wrapper: resumes with the first request path after the main checkout moved on'
+assert_contains "design-doc $spec" "$OUT" "preflight wrapper: a resume prints base's copy again"
 
 finish

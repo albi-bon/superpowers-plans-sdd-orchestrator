@@ -8,13 +8,20 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/assert.sh"
 QA="$here/../phase-qa"
 export PHASE_RUN_NAMESPACE=phase-parallel
+# As the skill's wrappers set it: the run directory is the main checkout's,
+# whichever worktree a script is called from.
+export PHASE_RUN_ANCHOR=main
 tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 repo="$tmp/repo"
+# Base lives in its own worktree, where the controller works and QA fixes
+# land. The main checkout stays on the owner's branch, with work in progress.
+bwt="$repo/.worktrees/base"
+spec="$bwt/spec.md"
 origin="$tmp/origin.git"
 run_in() {
   set +e
-  OUT=$(cd "$repo" && "$@" 2>&1)
+  OUT=$(cd "$bwt" && "$@" 2>&1)
   RC=$?
   set -e
 }
@@ -22,23 +29,29 @@ mkdir -p "$repo"
 git -C "$repo" init -q
 git -C "$repo" config user.email test@example.com
 git -C "$repo" config user.name Test
-git -C "$repo" symbolic-ref HEAD refs/heads/feat/x
+git -C "$repo" symbolic-ref HEAD refs/heads/main
 git init -q --bare "$origin"
 git -C "$repo" remote add origin "$origin"
 printf '# Example — Design Spec\n## Phase 1 — One\n## Phase 2 — Two\n' > "$repo/spec.md"
 printf 'shared\n' > "$repo/shared.txt"
 git -C "$repo" add spec.md shared.txt
 git -C "$repo" commit -qm initial
+git -C "$repo" branch feat/x
+mkdir -p "$repo/.worktrees"
+printf '*\n' > "$repo/.worktrees/.gitignore"
+git -C "$repo" worktree add -q "$bwt" feat/x
+printf 'work in progress\n' > "$repo/wip.txt"
+main_head=$(git -C "$repo" rev-parse HEAD)
 rundir="$repo/.superpowers/phase-parallel/spec"
 ledger="$rundir/run.md"
 iwt="$repo/.worktrees/integration"
 log() { printf '%s\n' "$@" >> "$ledger"; }
 reset_ledger() { # start the ledger again, then append the lines given
   mkdir -p "$rundir"
-  printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\n' "$repo/spec.md" > "$ledger"
+  printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\n' "$spec" > "$ledger"
   [ "$#" -eq 0 ] || log "$@"
 }
-qa() { run_in "$QA" "$repo/spec.md" feat/x "$@"; }
+qa() { run_in "$QA" "$spec" feat/x "$@"; }
 tip() { git -C "$repo" rev-parse --short "$1"; }
 commit_in() { # commit_in DIR FILE CONTENT
   printf '%s\n' "$3" > "$1/$2"; git -C "$1" add "$2"; git -C "$1" commit -qm "$2"
@@ -63,7 +76,7 @@ log 'qa: skipped — the product could not be started'
 qa open
 assert_eq '2' "$(grep -c '^qa: opened' "$ledger")" 'open after a skip: recorded again'
 
-commit_in "$repo" two.txt two
+commit_in "$bwt" two.txt two
 b2=$(tip feat/x)
 qa open
 assert_eq "$(git -C "$repo" rev-parse feat/x)" "$(git -C "$repo" rev-parse phase-qa-spec)" 'open: an unused QA branch follows base'
@@ -212,10 +225,10 @@ log 'qa: verified FAIL — unit suite'
 qa land "$f"
 assert_rc 22 'land: a FAIL is not a PASS'
 log "qa: verified PASS — $f"
-printf 'stray\n' > "$repo/stray.txt"
+printf 'stray\n' > "$bwt/stray.txt"
 qa land "$f"
-assert_rc 11 'land: refuses a dirty main checkout'
-rm "$repo/stray.txt"
+assert_rc 11 'land: refuses a dirty base worktree'
+rm "$bwt/stray.txt"
 qa land "$(tip feat/x)"
 assert_rc 19 'land: refuses a commit the QA branch is not at'
 qa land "$f"
@@ -227,6 +240,10 @@ assert_contains "push: feat/x at $f" "$(cat "$ledger")" 'land: base is pushed'
 assert_eq '' "$(git -C "$iwt" branch --show-current)" 'land: the integration worktree is detached'
 assert_eq "$f" "$(git -C "$iwt" rev-parse --short HEAD)" 'land: the integration worktree is on the base tip'
 assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: the QA branch is deleted'
+assert_eq "$f" "$(git -C "$bwt" rev-parse --short HEAD)" 'land: the base worktree is at the verified commit'
+assert_eq "$main_head" "$(git -C "$repo" rev-parse HEAD)" 'land: the main checkout is not moved'
+assert_eq 'main' "$(git -C "$repo" branch --show-current)" 'land: the main checkout stays on the branch of its owner'
+assert_eq 'work in progress' "$(cat "$repo/wip.txt")" 'land: work in progress in the main checkout is untouched'
 qa land "$f"
 assert_rc 17 'land: refuses a second landing'
 
@@ -236,7 +253,7 @@ qa open
 commit_in "$iwt" fix2.txt fix2
 f2=$(tip phase-qa-spec)
 log "qa: verified PASS — $f2"
-git -C "$repo" merge -q --ff-only phase-qa-spec
+git -C "$bwt" merge -q --ff-only phase-qa-spec
 qa land "$f2"
 assert_rc 0 'land: a re-run after an interruption finishes the landing'
 assert_contains "qa: landed ($f2)" "$(cat "$ledger")" 'land: the re-run records it'
@@ -265,11 +282,11 @@ git -C "$repo" remote rename away origin
 # --- land: the main checkout is elsewhere, or base moved ----------------------------
 
 log "qa: verified PASS — $f3"
-git -C "$repo" switch -q -c elsewhere
+git -C "$bwt" switch -q -c elsewhere
 qa land "$f3"
-assert_rc 13 'land: refuses when the main checkout is not on base'
-git -C "$repo" switch -q feat/x
-commit_in "$repo" moved.txt moved
+assert_rc 13 'land: refuses when the base worktree is not on base'
+git -C "$bwt" switch -q feat/x
+commit_in "$bwt" moved.txt moved
 qa land "$f3"
 assert_rc 21 'land: refuses when base moved past what the QA branch was built on'
 assert_eq 'yes' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: a refusal keeps the QA branch'

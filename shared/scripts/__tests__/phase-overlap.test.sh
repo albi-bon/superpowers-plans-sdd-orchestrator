@@ -133,6 +133,23 @@ run_in "$OVERLAP" "$tmp/spec.md" feat/x 4
 assert_eq 'clear' "$OUT" 'the repository ignore file adds a path pattern'
 rm "$tmp/.phase-overlap-ignore"
 
+# Base has a worktree of its own: the repository ignore file is read from
+# base's copy and from the main checkout, wherever the script is called from.
+mkdir -p "$tmp/.worktrees"
+printf '*\n' > "$tmp/.worktrees/.gitignore"
+git -C "$tmp" worktree add -q --detach "$tmp/.worktrees/base"
+printf 'src/schema/catalogue.ts\n' > "$tmp/.worktrees/base/.phase-overlap-ignore"
+run_in "$OVERLAP" "$tmp/spec.md" feat/x 4
+assert_eq 'clear' "$OUT" 'the ignore file on base is read from the main checkout'
+rm "$tmp/.worktrees/base/.phase-overlap-ignore"
+printf 'src/schema/catalogue.ts\n' > "$tmp/.phase-overlap-ignore"
+set +e
+OUT=$(cd "$tmp/.worktrees/base" && PHASE_RUN_ANCHOR=main "$OVERLAP" "$tmp/spec.md" feat/x 4 2>&1)
+set -e
+assert_eq 'clear' "$OUT" 'the ignore file in the main checkout is read from the base worktree'
+rm "$tmp/.phase-overlap-ignore"
+git -C "$tmp" worktree remove --force "$tmp/.worktrees/base"
+
 printf 'catalogue.ts\n' > "$rundir/overlap-ignore"
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 4
 assert_eq 'clear' "$OUT" 'the run-directory ignore file adds a file-name pattern'

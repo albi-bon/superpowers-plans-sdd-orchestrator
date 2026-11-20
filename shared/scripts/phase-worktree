@@ -2,8 +2,10 @@
 # Manage the git worktrees a parallel run builds its phases in.
 #
 # Every phase gets branch phase-<N>-<slug> checked out at
-# <main checkout>/.worktrees/phase-<N>-<slug>/. The main checkout itself stays
-# on the base branch for the whole run and is never switched by this script.
+# <main checkout>/.worktrees/phase-<N>-<slug>/. The base branch has a worktree
+# of its own beside them, .worktrees/base (phase-preflight creates it). The
+# main checkout only hosts the .worktrees directory: this script never
+# switches it, reads it or needs it clean.
 # .worktrees/ ignores itself with a '*' .gitignore, the same technique
 # phase-run-dir uses, so nothing under .git/ is edited by hand and no tracked
 # file changes.
@@ -17,8 +19,9 @@
 #              'phase N: released — phase M merged'. Refuses a branch that has
 #              commits of its own: only a phase that has not been built yet
 #              can be moved this way.
-#   check      refuse when any phase worktree is dirty. The integration
-#              worktree is not checked: phase-batch discards what a verifier
+#   check      refuse when any phase worktree is dirty. The base worktree is
+#              phase-preflight's to check. The integration worktree is not
+#              checked: phase-batch discards what a verifier
 #              left there and aborts a merge of its own it did not record.
 #   remove N   remove a landed phase's worktree; keep its branch.
 #   path N     print the worktree path.

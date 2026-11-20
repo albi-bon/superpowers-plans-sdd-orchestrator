@@ -21,8 +21,10 @@
 #             range the ledger was created with is used
 #   close     append 'qa: done — <summary>', counted from the ledger, and
 #             print it
-#   land SHA  fast-forward base to the QA branch in the main checkout, only
-#             when the ledger's last 'qa: verified' line passed exactly SHA;
+#   land SHA  fast-forward base to the QA branch in the base worktree,
+#             <main>/.worktrees/base, the only checkout it moves (the main
+#             checkout is the owner's: neither read nor touched), only when
+#             the ledger's last 'qa: verified' line passed exactly SHA;
 #             record 'qa: landed (<sha>)', push base, leave the integration
 #             worktree on the base tip, detached, and delete the QA branch.
 #             Checks run before anything moves. Re-run after an interruption,
@@ -109,8 +111,8 @@
 # Exit codes:
 #   0   done
 #   2   usage error, or no ledger
-#   11  land: main checkout not clean
-#   13  land: main checkout is not on BASE
+#   11  land: base worktree not clean
+#   13  land: the base worktree is missing, or not on BASE
 #   14  open: the QA branch exists and the ledger does not account for it
 #   17  open: a batch is still open; close: 'qa: done' is already recorded;
 #       land: the ledger already records the landing
@@ -157,6 +159,7 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
 fi
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 wt="$main/.worktrees/integration"
+basewt="$main/.worktrees/base"
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
 branch="phase-qa-$(basename "$rundir")"
@@ -544,12 +547,12 @@ compute() { # compute MODE
 case "$sub" in
   land)
     verified=$1
-    if [ "$(git -C "$main" branch --show-current)" != "$base" ]; then
-      echo "main checkout $main is not on base '$base' (git switch $base)" >&2
+    if [ "$(git -C "$basewt" branch --show-current 2>/dev/null || true)" != "$base" ]; then
+      echo "base worktree $basewt is missing or not on base '$base': run phase-preflight again, it puts base there" >&2
       exit 13
     fi
-    if [ -n "$(git -C "$main" status --porcelain)" ]; then
-      echo "main checkout not clean: landing would carry unverified changes (git status)" >&2
+    if [ -n "$(git -C "$basewt" status --porcelain)" ]; then
+      echo "base worktree not clean: landing would carry unverified changes (git -C '$basewt' status)" >&2
       exit 11
     fi
     if grep -q '^qa: landed (' "$ledger"; then
@@ -560,35 +563,35 @@ case "$sub" in
       echo "QA branch '$branch' does not exist" >&2
       exit 18
     fi
-    if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit}"); then
+    if ! verified_sha=$(git -C "$basewt" rev-parse --verify --quiet "$verified^{commit}"); then
       echo "verified SHA '$verified' is not a commit in this repository" >&2
       exit 19
     fi
-    if [ "$(git -C "$main" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
-      echo "QA branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify it again before landing" >&2
+    if [ "$(git -C "$basewt" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
+      echo "QA branch '$branch' is not at the verified $(git -C "$basewt" rev-parse --short "$verified_sha"): verify it again before landing" >&2
       exit 19
     fi
-    if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
+    if ! git -C "$basewt" merge-base --is-ancestor "$base" "$verified_sha"; then
       echo "base '$base' moved past what '$branch' was built on: the QA fixes cannot land" >&2
       exit 21
     fi
     passed=$(grep '^qa: verified ' "$ledger" | tail -n 1 | awk '/^qa: verified PASS/ { print $NF }' || true)
     if [ -z "$passed" ] \
-      || [ "$(git -C "$main" rev-parse --verify --quiet "$passed^{commit}" || true)" != "$verified_sha" ]; then
-      echo "the ledger shows no passing gates for $(git -C "$main" rev-parse --short "$verified_sha"): verify the QA branch before landing" >&2
+      || [ "$(git -C "$basewt" rev-parse --verify --quiet "$passed^{commit}" || true)" != "$verified_sha" ]; then
+      echo "the ledger shows no passing gates for $(git -C "$basewt" rev-parse --short "$verified_sha"): verify the QA branch before landing" >&2
       exit 22
     fi
     # Re-run after an interruption, base may already be at the QA tip: the
     # fast-forward is skipped and only what the ledger lacks is recorded.
-    if [ "$(git -C "$main" rev-parse HEAD)" != "$verified_sha" ]; then
-      before=$(git -C "$main" rev-parse HEAD)
-      if ! git -C "$main" merge -q --ff-only "$branch" >/dev/null 2>&1; then
-        git -C "$main" reset -q --hard "$before"
+    if [ "$(git -C "$basewt" rev-parse HEAD)" != "$verified_sha" ]; then
+      before=$(git -C "$basewt" rev-parse HEAD)
+      if ! git -C "$basewt" merge -q --ff-only "$branch" >/dev/null 2>&1; then
+        git -C "$basewt" reset -q --hard "$before"
         echo "fast-forward of '$base' to '$branch' failed; base unchanged" >&2
         exit 20
       fi
     fi
-    short=$(git -C "$main" rev-parse --short HEAD)
+    short=$(git -C "$basewt" rev-parse --short HEAD)
     printf 'qa: landed (%s)\n' "$short" >> "$ledger"
     echo "qa landed on $base ($short)"
     "$here/phase-push" "$doc" "$base" base >/dev/null || true
@@ -597,7 +600,7 @@ case "$sub" in
       reset_tracked
       git -C "$wt" switch -q --detach "refs/heads/$base"
     fi
-    git -C "$main" branch -q -d "$branch" >/dev/null 2>&1 || true
+    git -C "$basewt" branch -q -d "$branch" >/dev/null 2>&1 || true
     ;;
   push)
     if ! branch_exists; then

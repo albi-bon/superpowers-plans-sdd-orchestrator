@@ -183,4 +183,118 @@ run_in "$r" "$PRE" "$r/other/spec-design.md" feat/first 2
 assert_rc 15 'same basename, different spec: refused'
 assert_eq "$saved" "$(cat "$led")" 'basename collision preserves ledger'
 
+# --- PHASE_BASE_CHECKOUT=worktree ------------------------------------------
+# Base gets its own worktree, <main checkout>/.worktrees/base. The main
+# checkout is never switched and never has to be clean; the document is read
+# from base's copy, so the owner can move the main checkout mid-run.
+
+wt_pre() { # wt_pre DIR ARGS… — preflight as the parallel skill's wrapper runs it
+  dir=$1
+  shift
+  run_in "$dir" env PHASE_BASE_CHECKOUT=worktree PHASE_RUN_ANCHOR=main \
+    PHASE_RUN_NAMESPACE=phase-parallel "$PRE" "$@"
+}
+
+r=$(new_repo); track "$r"
+bw="$r/.worktrees/base"
+printf 'work in progress\n' > "$r/stray.txt"
+wt_pre "$r" "$r/spec-design.md" feat/tracker '2 to 6'
+assert_rc 0 'worktree mode: a dirty main checkout does not refuse the run'
+assert_eq 'main' "$(git -C "$r" branch --show-current)" 'worktree mode: the main checkout is not switched'
+assert_eq '?? stray.txt' "$(git -C "$r" status --porcelain)" \
+  'worktree mode: the main checkout keeps its changes, and .worktrees and .superpowers stay out of git status'
+assert_eq 'feat/tracker' "$(git -C "$bw" branch --show-current 2>/dev/null)" \
+  'worktree mode: base is created and checked out in .worktrees/base'
+assert_contains "base-worktree $bw" "$OUT" 'worktree mode: prints the base worktree'
+assert_contains "design-doc $bw/spec-design.md" "$OUT" "worktree mode: prints the document's path on base"
+led="$r/.superpowers/phase-parallel/spec-design/run.md"
+assert_eq "# Phase run — spec: $bw/spec-design.md" "$(sed -n 1p "$led" 2>/dev/null)" \
+  "worktree mode: the ledger lives in the main checkout and names base's copy of the document"
+
+wt_pre "$r" "$r/spec-design.md" feat/tracker '2 to 6'
+assert_rc 0 'worktree mode, second run: exits 0'
+wt_pre "$bw" spec-design.md feat/tracker '2 to 6'
+assert_rc 0 'worktree mode: resumes from inside the base worktree'
+assert_contains "run-dir $r/.superpowers/phase-parallel/spec-design" "$OUT" \
+  'worktree mode: the same run directory from inside the base worktree'
+git -C "$r" stash -q -u
+git -C "$r" switch -q -c elsewhere
+git -C "$r" rm -q spec-design.md
+git -C "$r" commit -qm 'a branch without the spec'
+wt_pre "$r" "$r/spec-design.md" feat/tracker '2 to 6'
+assert_rc 0 'worktree mode: resumes after the main checkout moved to a branch without the document'
+assert_eq 'elsewhere' "$(git -C "$r" branch --show-current)" 'worktree mode: and leaves it there'
+wt_pre "$r" "$r/spec-design.md" feat/other '2 to 6'
+assert_rc 15 'worktree mode: the same spec on another base is refused'
+
+printf 'left behind\n' > "$bw/stray.txt"
+wt_pre "$r" "$bw/spec-design.md" feat/tracker '2 to 6'
+assert_rc 11 'worktree mode: a dirty base worktree is refused'
+assert_contains 'base worktree not clean' "$OUT" 'dirty base worktree: message names the problem'
+
+# A base worktree left by an earlier run on another base is moved to this base.
+r=$(new_repo); track "$r"
+bw="$r/.worktrees/base"
+wt_pre "$r" "$r/spec-design.md" feat/a 2
+rm -rf "$r/.superpowers"
+wt_pre "$r" "$r/spec-design.md" feat/b 2
+assert_rc 0 'worktree mode: a new run reuses the base worktree of an earlier one'
+assert_eq 'feat/b' "$(git -C "$bw" branch --show-current 2>/dev/null)" 'reused base worktree: now on the new base'
+
+# Base is checked out somewhere the run does not own: refuse, touch nothing.
+r=$(new_repo); track "$r"
+git -C "$r" switch -q -c feat/x
+wt_pre "$r" "$r/spec-design.md" feat/x all
+assert_rc 13 'worktree mode: base checked out in the main checkout is refused'
+assert_contains "is checked out in $r" "$OUT" 'base in the main checkout: message names the checkout'
+assert_contains 'switch' "$OUT" 'base in the main checkout: message gives the command'
+assert_eq 'feat/x' "$(git -C "$r" branch --show-current)" 'base in the main checkout: it is not switched'
+assert_eq 'no' "$([ -e "$r/.worktrees/base" ] && echo yes || echo no)" 'base in the main checkout: no worktree created'
+
+# A ledger written when base lived in the main checkout names the main
+# checkout's copy of the document; it is the same run.
+r=$(new_repo); track "$r"
+git -C "$r" branch feat/x
+led="$r/.superpowers/phase-parallel/spec-design"
+mkdir -p "$led"
+printf '*\n' > "$r/.superpowers/phase-parallel/.gitignore"
+printf '# Phase run — spec: %s/spec-design.md\n# base: feat/x  requested: 2-3\n\n' "$r" > "$led/run.md"
+wt_pre "$r" "$r/spec-design.md" feat/x '2-3'
+assert_rc 0 'worktree mode: resumes a ledger that names the main checkout copy'
+assert_eq "# Phase run — spec: $r/spec-design.md" "$(sed -n 1p "$led/run.md")" 'earlier ledger: left as it was'
+
+# The document the run reads is the one committed on base.
+r=$(new_repo); track "$r"
+cp "$r/spec-design.md" "$r/new-design.md"
+wt_pre "$r" "$r/new-design.md" feat/x all
+assert_rc 26 'worktree mode: a document that is not committed is refused'
+assert_contains 'not committed on' "$OUT" 'uncommitted document: message names the problem'
+assert_eq 'no' "$([ -e "$r/.worktrees/base" ] && echo yes || echo no)" 'uncommitted document: refused before creating anything'
+rm "$r/new-design.md"
+printf '\nan edit nobody committed\n' >> "$r/spec-design.md"
+wt_pre "$r" "$r/spec-design.md" feat/x all
+assert_rc 26 'worktree mode: a document with uncommitted edits is refused on a fresh run'
+assert_contains 'differs from' "$OUT" 'edited document: message names the problem'
+git -C "$r" checkout -q -- spec-design.md
+printf 'scratch/\n' > "$r/.gitignore"
+git -C "$r" add .gitignore
+git -C "$r" commit -qm 'ignore scratch'
+mkdir "$r/scratch"
+cp "$r/spec-design.md" "$r/scratch/scratch-design.md"
+wt_pre "$r" "$r/scratch/scratch-design.md" feat/x all
+assert_rc 0 'worktree mode: a git-ignored document is read where it is'
+assert_contains "design-doc $r/scratch/scratch-design.md" "$OUT" 'ignored document: its own path is the one to use'
+
+r=$(new_repo); track "$r"
+wt_pre "$r" "$r/absent-design.md" feat/x all
+assert_rc 2 'worktree mode: a missing document exits 2'
+wt_pre "$r" "$r/spec-design.md" main all
+assert_rc 12 'worktree mode: base main is refused'
+wt_pre "$r" "$r/spec-design.md" feat/x '2-99'
+assert_rc 4 'worktree mode: an absent phase number exits 4'
+assert_eq 'no' "$([ -e "$r/.worktrees/base" ] && echo yes || echo no)" 'absent phase: refused before creating the base worktree'
+git -C "$r" branch -m main trunkless
+wt_pre "$r" "$r/spec-design.md" feat/x all
+assert_rc 13 'worktree mode: no main or master to create the base from exits 13'
+
 finish

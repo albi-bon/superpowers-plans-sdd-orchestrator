@@ -37,7 +37,10 @@
 # catalogues, generated agent-instruction files, markdown and other prose
 # docs, generated code, ORM migration metadata, and tests. Two optional files
 # add patterns, read after the built-ins in this order: '.phase-overlap-ignore'
-# at the repository root, then 'overlap-ignore' in the run directory. One
+# at the repository root, then 'overlap-ignore' in the run directory. The
+# repository root is every checkout that can hold the owner's copy: the main
+# checkout, the base worktree (<main checkout>/.worktrees/base, base's
+# committed copy) and the one the caller stands in. One
 # pattern per line; '#' starts a comment. A pattern without '/' matches the
 # file name; one with '/' matches the whole path from the repository root, and
 # a leading '**/' also matches at the root; '*' crosses '/'; a trailing '/'
@@ -164,6 +167,10 @@ test_*.py
 '
 
 toplevel=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+main=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+main=${main:-$toplevel}
+ignore_files=$(printf '%s\n' "$main/.phase-overlap-ignore" "$main/.worktrees/base/.phase-overlap-ignore" \
+  "$toplevel/.phase-overlap-ignore" | awk '!seen[$0]++')
 
 patterns=()
 while IFS= read -r line; do
@@ -173,7 +180,7 @@ while IFS= read -r line; do
   if [ -n "$line" ]; then patterns+=("$line"); fi
 done < <(
   printf '%s\n' "$BUILTIN_IGNORE"
-  for f in "$toplevel/.phase-overlap-ignore" "$rundir/overlap-ignore"; do
+  printf '%s\n' "$ignore_files" "$rundir/overlap-ignore" | while IFS= read -r f; do
     if [ -f "$f" ]; then cat "$f"; printf '\n'; fi
   done
 )

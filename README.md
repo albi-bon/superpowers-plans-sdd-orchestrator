@@ -14,7 +14,11 @@ All four share the scripts in `shared/scripts/`, keep a resumable ledger, and en
 at a report. The sequential three push nothing and open no PR; the parallel skill
 pushes its branches to `origin` and opens a pull request from base, never merging
 it. The sequential three run exactly one
-repair attempt per phase; the parallel skill allows a repair and a rescue. Each
+repair attempt per phase; the parallel skill allows a repair and a rescue. The
+sequential three work in the checkout they are invoked in and switch it to the
+base branch. The parallel skill keeps the base branch in a worktree of its own,
+`.worktrees/base`, and works from there: it never switches the main checkout or
+needs it clean, so that checkout stays free for other work during a run. Each
 skill keeps its runs in its own run directory (`.superpowers/phase-builder/`,
 `.superpowers/phase-orchestrator/`, `.superpowers/phase-executor/` and
 `.superpowers/phase-parallel/`).

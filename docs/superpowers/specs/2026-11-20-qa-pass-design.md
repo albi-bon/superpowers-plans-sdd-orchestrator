@@ -400,7 +400,7 @@ of `phase-batch` and `phase-land`.
 | `next [RANGE]` | judges "every requested phase merged" on `RANGE`, the phases this invocation asked for (the ledger header's range without it); reads only the ledger and prints one action: `skip <reason>`, `open`, `plan`, `walk <F>…`, `triage`, `fix <G>`, `verify <sha>`, `land <sha>`, `push`, `recheck <F>…`, `close`, or `done` |
 | `close` | appends `qa: done — <summary>`, the summary computed from the ledger |
 | `status` | prints the pass's stage and progress for the status line, or nothing when no pass is active |
-| `land SHA` | fast-forwards base to the QA branch in the main checkout, refusing unless the ledger shows `qa: verified PASS` for exactly that commit and the main checkout is clean and on base; appends `qa: landed (<sha>)`; pushes base through `phase-push`; puts the integration worktree on the base tip, detached; deletes the QA branch |
+| `land SHA` | fast-forwards base to the QA branch in the base worktree (`.worktrees/base`; the main checkout is the owner's and is never touched), refusing unless the ledger shows `qa: verified PASS` for exactly that commit and the base worktree is clean and on base; appends `qa: landed (<sha>)`; pushes base through `phase-push`; puts the integration worktree on the base tip, detached; deletes the QA branch |
 | `push` | pushes the QA branch as a backup after a gates `FAIL`, recording the outcome like `phase-push`; a branch that is gone is recorded as a failed push, so `next` always moves on |
 | `report` | prints the report's QA block from the ledger, the flows index, the triage index and the recheck files |
 
@@ -420,7 +420,7 @@ When `phase-qa` refuses, base is unchanged. Then:
 | Refusal | Do |
 |---|---|
 | `open`: a batch is open, or the QA branch exists and the ledger does not account for it (exit 14, as `phase-batch` uses it) | append `qa: skipped — <stderr>` and go on to the report |
-| `land`: the main checkout is dirty or not on base | stop and show stderr verbatim, as for `phase-land` exits 11 and 13: the repository was changed under the run, and the owner restores it and resumes |
+| `land`: the base worktree is dirty, missing or not on base | stop and show stderr verbatim, as for `phase-land` exits 11 and 13: the repository was changed under the run, and the owner restores it and resumes |
 | `land`: any other refusal | append `qa: not landed — <stderr>`, run `phase-qa push`, and go on to the report. There is no re-check |
 
 After a gates `FAIL` or a `not landed`, the QA branch stays. It belongs to this run's
