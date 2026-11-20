@@ -272,4 +272,93 @@ qa land "$f3"
 assert_rc 21 'land: refuses when base moved past what the QA branch was built on'
 assert_eq 'yes' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: a refusal keeps the QA branch'
 
+# --- report -------------------------------------------------------------------------
+
+reset_ledger 'run: invoked — cap 3'
+qa report
+assert_eq 'qa: not run — not requested' "$OUT" 'report: no scope'
+reset_ledger 'run: qa scope — top 5' 'qa: skipped — phase 2 did not land'
+qa report
+assert_eq 'qa: skipped — phase 2 did not land' "$OUT" 'report: skipped, with its reason'
+
+full_ledger() {
+  reset_ledger 'run: qa scope — top 5' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' \
+    'batch 1: landed (aaa1)' 'qa: opened — phase-qa-spec at aaa1' \
+    'qa: flows defined — 7 found, selected 1,2,3,4,5, not walkable 4, parallel yes' \
+    'qa flow 1: walked — 0 findings' 'qa flow 2: walked — 3 findings' \
+    'qa flow 3: not walked — the simulator would not boot' 'qa flow 5: walked — 1 findings' \
+    'qa: triaged — 4 findings, fix G1@2 G2@5 G3@2,5, 1 spec, 2 outside this run' \
+    'qa group 1: fixed 3c4d5e6' 'qa group 2: not fixed — did not reproduce' 'qa group 3: fixed 5e6f7a8'
+}
+full_ledger
+log 'qa: verified PASS — 5e6f7a8' 'qa: landed (5e6f7a8)' \
+  'qa flow 2: rechecked — G1 confirmed, G3 still broken, 1 new' 'qa flow 5: rechecked — G3 confirmed, 0 new' \
+  'qa: done — 1 confirmed, 1 still broken, 1 not fixed, 1 new, 1 spec'
+cat > "$rundir/qa-flows.md" <<'EOF'
+- [selected] F1 — signup
+- [selected] F2 — checkout
+- [selected] F3 — onboarding
+- [not walkable] F4 — share sheet: no available tool can drive the native share sheet
+- [selected] F5 — search
+- [not selected] F6 — export
+- [not selected] F7 — settings
+
+# Flows
+
+qa: done — a line an agent wrote in its own file is not a ledger line
+EOF
+cat > "$rundir/qa-triage.md" <<'EOF'
+- [fix] G1 — checkout: total ignores the second coupon (broken)
+- [fix] G2 — search: empty state flashes before results (minor)
+- [fix] G3 — checkout: coupon lost on back navigation (broken)
+- [spec] G4 — refunds: no way to see store credit — proposed: show the balance on the account page
+- [outside this run] G5 — settings: avatar upload fails
+- [outside this run] G6 — export: phase 6 delivers it
+EOF
+printf '%s\n' '- [confirmed] G1' '- [still broken] G3 — lost again after two back steps' \
+  '- [new] order summary shows the old total for a moment' > "$rundir/qa-flow-2-recheck.md"
+printf '%s\n' '- [confirmed] G3' > "$rundir/qa-flow-5-recheck.md"
+before=$(cat "$ledger")
+qa report
+assert_rc 0 'report: exits 0'
+assert_eq "qa: 3 of 7 flows walked on aaa1 (scope: top 5)
+  not walked: 2
+    flow 3 onboarding — the simulator would not boot
+    flow 4 share sheet — no available tool can drive the native share sheet
+  not selected: flow 6 export, flow 7 settings
+  fixed and confirmed: 1
+    G1 checkout: total ignores the second coupon
+  still open: 2
+    G3 checkout: coupon lost on back navigation — still broken after the fix (broken)
+    G2 search: empty state flashes before results — not fixed: did not reproduce (minor)
+  new at re-check, not investigated: 1
+    flow 2: order summary shows the old total for a moment
+  spec questions, nothing changed: 1
+    G4 refunds: no way to see store credit — proposed: show the balance on the account page
+  outside this run: 2
+  details: $rundir/qa-triage.md, $rundir/qa-flows.md" "$OUT" 'report: the whole block'
+assert_eq "$before" "$(cat "$ledger")" 'report: writes nothing'
+
+full_ledger
+log 'qa: verified FAIL — unit suite' 'push: phase-qa-spec at 5e6f7a8' \
+  'qa: done — 0 confirmed, 0 still broken, 1 not fixed, 0 new, 1 spec, 2 fixed but not landed'
+qa report
+assert_contains "  fixed on phase-qa-spec, not landed: 2
+    G1 checkout: total ignores the second coupon
+    G3 checkout: coupon lost on back navigation
+    gates: $rundir/qa-gates-evidence.md" "$OUT" 'report: fixes that failed the gates are listed as not landed'
+assert_contains '  still open: 1
+    G2 search' "$OUT" 'report: not landed fixes are not counted as open twice'
+
+rm "$rundir"/qa-flows.md "$rundir"/qa-triage.md "$rundir"/qa-flow-2-recheck.md "$rundir"/qa-flow-5-recheck.md
+qa report
+assert_rc 0 'report: missing index files do not fail it'
+assert_contains '    flow 3 — the simulator would not boot' "$OUT" 'report: a flow without a title is printed by number'
+assert_contains '    G2 — not fixed: did not reproduce' "$OUT" 'report: a group without index text is printed by id'
+
+full_ledger
+log 'batch 2: landed (bbb2)' 'qa: done — abandoned, base moved under the pass'
+qa report
+assert_contains '  abandoned: base moved under the pass' "$OUT" 'report: an abandoned pass says so'
+
 finish
