@@ -118,7 +118,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     At most six lines:
     - DEFINED, or BLOCKED — <one-line reason>
     - found: <number of flows>
-    - selected: <flow numbers, comma-separated, or ->
+    - selected: <flow numbers, comma-separated, or -> (numbers only, without the F)
     - not walkable: <flow numbers among the selected ones, comma-separated, or ->
     - parallel: yes or parallel: no (whether walkers can use the product side by side)
     - FLOWS_PATH

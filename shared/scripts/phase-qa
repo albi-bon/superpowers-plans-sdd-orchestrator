@@ -15,7 +15,10 @@
 #             (created, or re-attached with tracked changes discarded; a
 #             branch that holds no fix yet follows base), record
 #             'qa: opened — <branch> at <sha>', print 'opened <sha>'
-#   next      print the one action the ledger allows next; write nothing
+#   next [RANGE]
+#             print the one action the ledger allows next; write nothing.
+#             RANGE is the phases this invocation asked for; without it the
+#             range the ledger was created with is used
 #   close     append 'qa: done — <summary>', counted from the ledger, and
 #             print it
 #   land SHA  fast-forward base to the QA branch in the main checkout, only
@@ -25,7 +28,8 @@
 #             Checks run before anything moves. Re-run after an interruption,
 #             it finishes the landing
 #   push      push the QA branch as a backup of fixes that did not land; a
-#             failed push is recorded, never fatal (as phase-push)
+#             failed push, or a branch that is gone, is recorded and never
+#             fatal (as phase-push), so 'next' always moves on
 #   report    print the QA block of the run's report, from the ledger and
 #             the index lines of the pass's files; write nothing. A missing
 #             file or line never fails it: the id is printed without a title
@@ -57,10 +61,18 @@
 #                                     - [spec] G4 — refunds: <one line> — proposed: <change>
 #                                     - [outside this run] G5 — <one line>
 #   <run-dir>/qa-flow-<F>-recheck.md  - [new] <one line>
-# Lists are comma-separated numbers, or '-'; spaces after the commas are
-# ignored. In the triaged line each fix group names the flows its findings
-# came from, in fix order. '<role> dispatched' lines are progress markers and
-# never change what comes next.
+# Lists are comma-separated numbers, or '-'. In the triaged line each fix
+# group names the flows its findings came from, in fix order. '<role>
+# dispatched' lines are progress markers and never change what comes next.
+#
+# An agent's return is copied into these lines by a controller, so the reading
+# forgives what that invites: spaces after commas, a colon after a label
+# ('selected: 1,2'), flows and groups written with their letter ('F1', 'G2'),
+# a comma between fix groups, a hyphen for the dash, and words between
+# 'verified PASS' and the commit, which is the line's last word. A QA line
+# that still cannot be read ends the pass: 'next' prints 'close' and the done
+# line names it. A pass that stops is reported; one that guesses could repeat
+# a stage for ever.
 #
 # 'next' prints the first of these that applies. A 'qa: skipped' line is
 # superseded when a 'batch <K>: landed', 'run: final check' or 'run: qa scope'
@@ -69,6 +81,7 @@
 #    1  no scope recorded, or scope 'none'            done
 #    2  'qa: done' recorded                           done
 #    3  a skip that is not superseded                 done
+#       a QA line that cannot be read                 close
 #    4  no flows defined, a requested phase is not
 #       merged                                        skip phase <N> did not land
 #    5  no flows defined, the last final check failed skip the final check failed
@@ -101,18 +114,20 @@
 #   14  open: the QA branch exists and the ledger does not account for it
 #   17  open: a batch is still open; close: 'qa: done' is already recorded;
 #       land: the ledger already records the landing
-#   18  close: the pass is not over; land, push: the QA branch does not exist
+#   18  close: the pass is not over; land: the QA branch does not exist
 #   19  land: SHA is not a commit, or the QA branch is not at it
 #   20  land: the fast-forward failed; base unchanged
 #   21  land: base moved past what the QA branch was built on
 #   22  land: the ledger does not show SHA as verified
 #
-# Usage: phase-qa DESIGN_DOC BASE open|next|close|push|report|status
+# Usage: phase-qa DESIGN_DOC BASE open|close|push|report|status
+#        phase-qa DESIGN_DOC BASE next [RANGE]
 #        phase-qa DESIGN_DOC BASE land SHA
 set -euo pipefail
 
 usage() {
-  echo "usage: phase-qa DESIGN_DOC BASE open|next|close|push|report|status" >&2
+  echo "usage: phase-qa DESIGN_DOC BASE open|close|push|report|status" >&2
+  echo "       phase-qa DESIGN_DOC BASE next [RANGE]" >&2
   echo "       phase-qa DESIGN_DOC BASE land SHA" >&2
   exit 2
 }
@@ -123,7 +138,8 @@ base=$2
 sub=$3
 shift 3
 case "$sub" in
-  open | next | close | push | report | status) [ "$#" -eq 0 ] || usage ;;
+  open | close | push | report | status) [ "$#" -eq 0 ] || usage ;;
+  next) [ "$#" -le 1 ] || usage ;;
   land) [ "$#" -eq 1 ] || usage ;;
   *) usage ;;
 esac
@@ -176,10 +192,14 @@ reset_tracked() {
   fi
 }
 
-# The lowest requested phase that is not merged, if any.
+# The lowest requested phase that is not merged, if any. The requested phases
+# are those of this invocation when 'next' was given them; a resume may ask
+# for other phases than the ledger's header records.
+asked_range=""
+if [ "$sub" = next ] && [ "$#" -eq 1 ]; then asked_range=$1; fi
 unmerged_phase() {
   local range state n
-  range=$(sed -n '2s/^# base: .*  requested: //p' "$ledger")
+  range=${asked_range:-$(sed -n '2s/^# base: .*  requested: //p' "$ledger")}
   state=$("$here/phase-state" "$doc")
   for n in $("$here/parse-phases" "$doc" "$range" | cut -f1); do
     if ! printf '%s\n' "$state" | awk -F'\t' -v n="$n" '$1 == n && $2 == "merged" { f = 1 } END { exit !f }'; then
@@ -251,10 +271,24 @@ PARSE='
   }
   /^batch [0-9]+: landed/ { landnr = NR; next }
   index($0, "push: " branch " ") == 1 { pushnr = NR; next }
-  /^qa: / || /^qa flow [0-9]+: / || /^qa group [0-9]+: / {
-    if ($0 !~ / dispatched$/) { q[++qn] = $0; qnr[qn] = NR }
+  /^qa: / || /^qa flow / || /^qa group / {
+    if ($0 ~ / dispatched$/) next
+    norm = $0
+    sub(/^qa flow F/, "qa flow ", norm)
+    sub(/^qa group G/, "qa group ", norm)
+    if (norm !~ / — /) sub(/ - /, " — ", norm)
+    q[++qn] = norm; qraw[qn] = $0; qnr[qn] = NR
     next
   }
+  # A list of numbers as a controller may have copied it: "", or "?" when it
+  # is not one.
+  function numlist(s) {
+    gsub(/[ \t:F]/, "", s)
+    gsub(/^,+|,+$/, "", s)
+    if (s == "-" || s == "") return ""
+    return (s ~ /^[0-9]+(,[0-9]+)*$/) ? s : "?"
+  }
+  function unreadable(i) { if (bad == "") bad = qraw[i] }
   function read(   i, l, nr, body, f, g, t, n, j, tok, c) {
     epoch = 0
     for (i = 1; i <= qn; i++)
@@ -268,10 +302,15 @@ PARSE='
         flowsnr = nr
         body = l; sub(/^qa: flows defined — /, "", body)
         found = body + 0
-        nsel = split(clean(between(body, ", selected ", ", not walkable ")), sel, ",")
-        n = split(clean(between(body, ", not walkable ", ", parallel ")), t, ",")
-        for (j = 1; j <= n; j++) if (t[j] != "") unwalkable[t[j]] = 1
-        parallel = clean(between(body, ", parallel ", ""))
+        t[1] = numlist(between(body, "selected", "not walkable"))
+        t[2] = numlist(between(body, "not walkable", "parallel"))
+        if (!index(body, "selected") || t[1] == "?" || t[2] == "?") unreadable(i)
+        else {
+          nsel = split(t[1], sel, ",")
+          n = split(t[2], tok_, ",")
+          for (j = 1; j <= n; j++) if (tok_[j] != "") unwalkable[tok_[j]] = 1
+        }
+        parallel = (between(body, "parallel", "") ~ /no/) ? "no" : "yes"
       }
       else if (l ~ /^qa flow [0-9]+: /) {
         f = l; sub(/^qa flow /, "", f); sub(/:.*$/, "", f)
@@ -282,45 +321,52 @@ PARSE='
           fout[f] = "walked"; findings += c + 0
         }
         else if (body ~ /^not walked/) { fout[f] = "not"; fwhy[f] = body; sub(/^not walked — /, "", fwhy[f]) }
-        else if (body ~ /^rechecked — /) {
+        else if (body ~ /^rechecked/) {
+          # A group named neither confirmed nor still broken — "G1 not
+          # rechecked" — stays fixed and unconfirmed.
           rechecked[f] = 1
-          sub(/^rechecked — /, "", body)
+          sub(/^rechecked( —)? */, "", body)
           n = split(body, t, /, */)
           for (j = 1; j <= n; j++) {
             tok = t[j]
-            if (tok ~ /^G[0-9]+ confirmed/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); confirmed[g] = 1 }
-            else if (tok ~ /^G[0-9]+ still broken/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); broken[g] = 1 }
+            if (tok ~ /^G?[0-9]+ confirmed/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); confirmed[g] = 1 }
+            else if (tok ~ /^G?[0-9]+ still broken/) { g = tok; sub(/^G/, "", g); sub(/ .*$/, "", g); broken[g] = 1 }
             else if (tok ~ /^[0-9]+ new/) newcount += tok + 0
+            else if (tok ~ /^new: *[0-9]+/) { sub(/^new: */, "", tok); newcount += tok + 0 }
           }
         }
+        else unreadable(i)
       }
       else if (l ~ /^qa: triaged — /) {
         triaged = 1
         body = l; sub(/^qa: triaged — /, "", body)
-        t[1] = between(body, ", fix ", " spec")
-        speccount = lastword(t[1]) + 0
-        sub(/, *[0-9]+$/, "", t[1])
-        gsub(/, +/, ",", t[1])
-        outside = between(body, " spec, ", "") + 0
-        n = split(t[1], tok_, " ")
-        for (j = 1; j <= n; j++) {
-          if (tok_[j] !~ /^G[0-9]+@/) continue
-          g = tok_[j]; sub(/^G/, "", g); sub(/@.*$/, "", g)
-          f = tok_[j]; sub(/^G[0-9]+@/, "", f)
+        seg = between(body, "fix", " spec")
+        if (seg ~ /, *[0-9]+ *$/) { speccount = lastword(seg) + 0; sub(/, *[0-9]+ *$/, "", seg) }
+        c = between(body, " spec", "")
+        outside = match(c, /[0-9]+/) ? substr(c, RSTART, RLENGTH) + 0 : 0
+        c = seg; gsub(/[ \t:,]/, "", c)
+        while (match(seg, /G?[0-9]+@[0-9]+(, *[0-9]+)*/)) {
+          tok = substr(seg, RSTART, RLENGTH)
+          seg = substr(seg, RSTART + RLENGTH)
+          g = tok; sub(/^G/, "", g); sub(/@.*$/, "", g)
+          f = tok; sub(/^G?[0-9]+@/, "", f); gsub(/ /, "", f)
           group[++ngroups] = g; gflows[g] = f
         }
+        if (!index(body, "fix") || (!ngroups && c != "-" && c != "")) unreadable(i)
       }
       else if (l ~ /^qa group [0-9]+: /) {
         g = l; sub(/^qa group /, "", g); sub(/:.*$/, "", g)
         body = l; sub(/^qa group [0-9]+: /, "", body)
         if (body ~ /^fixed /) { gout[g] = "fixed"; lastfix = lastword(body) }
         else if (body ~ /^not fixed/) { gout[g] = "not"; greason[g] = body; sub(/^not fixed — /, "", greason[g]) }
+        else unreadable(i)
       }
       else if (l ~ /^qa: verified PASS/) { verdict = "PASS"; vsha = lastword(l) }
       else if (l ~ /^qa: verified FAIL/) { verdict = "FAIL"; failnr = nr }
       else if (l ~ /^qa: landed \(/) landed = 1
       else if (l ~ /^qa: not landed/) { notlanded = 1; failnr = nr }
       else if (l ~ /^qa: done/) { done = 1; doneline = l }
+      else unreadable(i)
     }
     # What is left to walk, fix and re-check.
     for (i = 1; i <= nsel; i++) {
@@ -358,6 +404,7 @@ PARSE='
     if (scope == "" || scope == "none") { action = "done"; return }
     if (done) { action = "done"; return }
     if (skipped) { action = "done"; return }
+    if (bad != "") { action = "close"; stopped = 1; return }
     if (!flowsnr) {
       if (unmerged != "") { action = "skip phase " unmerged " did not land"; return }
       if (finalfail) { action = "skip the final check failed"; return }
@@ -384,7 +431,8 @@ PARSE='
     }
     action = "close"
   }
-  function summary(   i, g, c, b, out) {
+  function summary(   i, g, c, b, u, out) {
+    if (stopped) return "stopped: unreadable ledger line: " bad
     if (abandoned) return "abandoned, base moved under the pass"
     if (!nwalked) return "nothing to walk"
     if (!triaged) return nwalked " flows walked, no findings"
@@ -394,9 +442,11 @@ PARSE='
         if (gout[g] != "fixed") continue
         if (g in broken) b++
         else if (g in confirmed) c++
+        else u++
       }
     out = (c + 0) " confirmed, " (b + 0) " still broken, " (nnotfixed + 0) " not fixed, " (newcount + 0) " new, " (speccount + 0) " spec"
     if (unlanded && nfixed) out = out ", " nfixed " fixed but not landed"
+    if (u) out = out ", " u " not re-checked"
     return out
   }
   function flowname(f) { return "flow " f ((f in ftitle) && ftitle[f] != "" ? " " ftitle[f] : "") }
@@ -411,6 +461,7 @@ PARSE='
     if (!flowsnr) {
       if (scope == "" || scope == "none") print "qa: not run — not requested"
       else if (skipped) print "qa: skipped — " skipreason
+      else if (bad != "") print "qa: stopped — unreadable ledger line: " bad
       else print "qa: not run"
       return
     }
@@ -469,6 +520,7 @@ PARSE='
     if (speccount + 0) print "  spec questions, nothing changed: " speccount
     for (i = 1; i <= nspeclist; i++) print groupline(speclist[i], "", 0)
     if (outside + 0) print "  outside this run: " outside
+    if (bad != "") print "  stopped: unreadable ledger line: " bad
     if (abandoned || doneline ~ /abandoned/) print "  abandoned: base moved under the pass"
     print "  details: " rundir "/qa-triage.md, " rundir "/qa-flows.md"
   }
@@ -520,7 +572,7 @@ case "$sub" in
       echo "base '$base' moved past what '$branch' was built on: the QA fixes cannot land" >&2
       exit 21
     fi
-    passed=$(grep '^qa: verified ' "$ledger" | tail -n 1 | sed -n 's/^qa: verified PASS — //p' | awk '{ print $1 }' || true)
+    passed=$(grep '^qa: verified ' "$ledger" | tail -n 1 | awk '/^qa: verified PASS/ { print $NF }' || true)
     if [ -z "$passed" ] \
       || [ "$(git -C "$main" rev-parse --verify --quiet "$passed^{commit}" || true)" != "$verified_sha" ]; then
       echo "the ledger shows no passing gates for $(git -C "$main" rev-parse --short "$verified_sha"): verify the QA branch before landing" >&2
@@ -549,8 +601,10 @@ case "$sub" in
     ;;
   push)
     if ! branch_exists; then
-      echo "QA branch '$branch' does not exist" >&2
-      exit 18
+      line="push: $branch failed — the branch does not exist"
+      printf '%s\n' "$line" >> "$ledger"
+      printf '%s\n' "$line"
+      exit 0
     fi
     short=$(git -C "$main" rev-parse --short "refs/heads/$branch")
     set +e

@@ -85,8 +85,12 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        these forms, because the run's report is built from them:
          - [confirmed] G1
          - [still broken] G3 — <one line: what still happens>
+         - [not rechecked] G2 — <why the steps could not be repeated>
        A group is confirmed when every one of its findings in this flow is
-       gone.
+       gone. When the steps cannot be repeated — the product no longer
+       starts, the tool fails — the group is not rechecked. Never call a fix
+       confirmed that you did not see working, or broken that you could not
+       reach.
     4. If you notice something else that is wrong, add one line,
        `- [new] <one line>`, and do not investigate it. It goes into the
        run's report as it is. Nothing is fixed after this point.
@@ -114,7 +118,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     In recheck mode:
     - RECHECKED
-    - each group in RECHECK_GROUPS as `G1 confirmed` or `G3 still broken`, comma-separated
+    - each group in RECHECK_GROUPS as `G1 confirmed`, `G3 still broken` or `G2 not rechecked`, comma-separated
     - new: <n>
     - RECHECK_PATH
 

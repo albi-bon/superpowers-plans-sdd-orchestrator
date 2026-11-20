@@ -245,7 +245,9 @@ assert_contains "qa: landed ($f2)" "$(cat "$ledger")" 'land: the re-run records 
 
 reset_ledger 'run: qa scope — all'
 qa push
-assert_rc 18 'push: refuses when there is no QA branch'
+assert_rc 0 'push: a missing QA branch is recorded, not fatal'
+assert_eq 'push: phase-qa-spec failed — the branch does not exist' "$OUT" 'push: says the branch is missing'
+assert_contains 'push: phase-qa-spec failed — the branch does not exist' "$(cat "$ledger")" 'push: the missing branch is in the ledger, so next moves on'
 qa open
 commit_in "$iwt" fix3.txt fix3
 f3=$(tip phase-qa-spec)
@@ -360,5 +362,57 @@ full_ledger
 log 'batch 2: landed (bbb2)' 'qa: done — abandoned, base moved under the pass'
 qa report
 assert_contains '  abandoned: base moved under the pass' "$OUT" 'report: an abandoned pass says so'
+
+# --- the lines a real controller writes: variants, and lines nobody can read ---------
+
+pass_ledger '2 found, selected F1,F2, not walkable -, parallel yes'
+nx 'walk 1 2' 'flow numbers written with their F'
+log 'qa flow F1: walked — 1 findings' 'qa flow 2: walked - 0 findings'
+nx 'triage' 'a flow line with its F, or with a hyphen for the dash, is still an outcome'
+log 'qa: triaged — 1 findings, fix: G1@1, G2@2, 0 spec, 0 outside this run'
+nx 'fix 1' 'a colon after fix and a comma between groups'
+log 'qa group G1: fixed 1111111' 'qa group 2: fixed 2222222' 'qa: verified PASS — full suites all — 2222222'
+nx 'land 2222222' 'the verified commit is the last word of the line'
+log 'qa: landed (2222222)'
+nx 'recheck 1 2' 'both groups were read'
+pass_ledger '5 found, selected: 1,2, not walkable: -, parallel: no'
+nx 'walk 1' 'colons copied from the return'
+
+pass_ledger '2 found, selected one and two, not walkable -, parallel yes'
+closes 'qa: done — stopped: unreadable ledger line: qa: flows defined — 2 found, selected one and two, not walkable -, parallel yes' \
+  'a list nobody can read stops the pass instead of looping'
+qa report
+assert_contains '  stopped: unreadable ledger line: qa: flows defined' "$OUT" 'report: a stopped pass says why'
+pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: strolled about'
+closes 'qa: done — stopped: unreadable ledger line: qa flow 1: strolled about' 'an outcome line of no known shape stops the pass'
+pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: walked — 1 findings' \
+  'qa: triaged — 1 findings, fix the lot, 0 spec, 0 outside this run'
+closes 'qa: done — stopped: unreadable ledger line: qa: triaged — 1 findings, fix the lot, 0 spec, 0 outside this run' \
+  'fix groups nobody can read stop the pass instead of being dropped'
+
+pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: walked — 1 findings' \
+  'qa: triaged — 1 findings, fix G1@1, 0 spec, 0 outside this run' 'qa group 1: fixed 1111111' \
+  'qa: verified PASS — 1111111' 'qa: landed (1111111)' 'qa flow 1: rechecked — G1 not rechecked, 0 new'
+closes 'qa: done — 0 confirmed, 0 still broken, 0 not fixed, 0 new, 0 spec, 1 not re-checked' \
+  'a re-check that could not be done is an outcome, and is counted'
+
+# The requested phases are this invocation's, not the ones the ledger was created with.
+reset_ledger 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'batch 1: landed (aaa1)'
+qa next 1
+assert_eq 'open' "$OUT" 'next RANGE: only the phases of this invocation must have landed'
+qa next 1-2
+assert_eq 'skip phase 2 did not land' "$OUT" 'next RANGE: a wider range than the header is checked too'
+nx 'skip phase 2 did not land' 'without a range the ledger header is used'
+
+# The verified commit is the last word of the line, for land as for next.
+git -C "$iwt" switch -q --detach feat/x
+git -C "$repo" branch -q -D phase-qa-spec
+reset_ledger 'run: qa scope — all'
+qa open
+commit_in "$iwt" fix4.txt fix4
+f4=$(tip phase-qa-spec)
+log "qa: verified PASS — full suites all — $f4"
+qa land "$f4"
+assert_rc 0 'land: reads the verified commit as the last word, as next does'
 
 finish

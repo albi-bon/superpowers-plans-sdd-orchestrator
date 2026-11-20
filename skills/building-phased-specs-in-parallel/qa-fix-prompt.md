@@ -38,7 +38,9 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     ## Your job
 
-    0. Check whether this group was already fixed. If `git log START_SHA..HEAD`
+    0. Check whether this group was already fixed. Look from BASE, not from
+       START_SHA: when this role is dispatched a second time, START_SHA is
+       taken after the first one's commit. If `git log BASE..HEAD`
        already has a commit whose subject starts with `qa: GGROUP_NUMBER —`, an
        earlier dispatch of this role made it and was interrupted before it
        could report. Discard uncommitted changes (`git reset --hard`),

@@ -397,11 +397,11 @@ of `phase-batch` and `phase-land`.
 | Subcommand | Does |
 |---|---|
 | `open` | refuses while a batch is open; creates the QA branch at the base tip in the integration worktree, or re-attaches to it; appends `qa: opened — <branch> at <sha>`; prints `opened <sha>` |
-| `next` | reads only the ledger and prints one action: `skip <reason>`, `open`, `plan`, `walk <F>…`, `triage`, `fix <G>`, `verify <sha>`, `land <sha>`, `push`, `recheck <F>…`, `close`, or `done` |
+| `next [RANGE]` | judges "every requested phase merged" on `RANGE`, the phases this invocation asked for (the ledger header's range without it); reads only the ledger and prints one action: `skip <reason>`, `open`, `plan`, `walk <F>…`, `triage`, `fix <G>`, `verify <sha>`, `land <sha>`, `push`, `recheck <F>…`, `close`, or `done` |
 | `close` | appends `qa: done — <summary>`, the summary computed from the ledger |
 | `status` | prints the pass's stage and progress for the status line, or nothing when no pass is active |
 | `land SHA` | fast-forwards base to the QA branch in the main checkout, refusing unless the ledger shows `qa: verified PASS` for exactly that commit and the main checkout is clean and on base; appends `qa: landed (<sha>)`; pushes base through `phase-push`; puts the integration worktree on the base tip, detached; deletes the QA branch |
-| `push` | pushes the QA branch as a backup after a gates `FAIL`, recording the outcome like `phase-push` |
+| `push` | pushes the QA branch as a backup after a gates `FAIL`, recording the outcome like `phase-push`; a branch that is gone is recorded as a failed push, so `next` always moves on |
 | `report` | prints the report's QA block from the ledger, the flows index, the triage index and the recheck files |
 
 Like `phase-schedule`, `next` prints the action whether or not its agent is already
@@ -505,7 +505,11 @@ body.
 | **Q15** | **The QA branch is named after the run and deleted when it lands.** | Batch branches are cleaned up by the next batch; nothing comes after the pass to clean up for it. A per-run name keeps a branch kept after failed gates from blocking another spec's run. |
 | **Q16** | **The third triage class is `outside this run`**: behaviour from before the run, and deliverables of phases outside `RANGE`. | A run is often part of a document. Without it, a finding about a phase nobody asked for would be classed `fix`, and a fixer would start building that phase. |
 
-Q1 to Q3 are the owner's decisions. Q4 to Q16 are the designer's, open to correction.
+| **Q17** | **A QA ledger line the script cannot read ends the pass**: `next` prints `close` and the done line names the line. The reading first forgives what a copied return invites (labels with colons, `F`/`G` prefixes, a comma between groups, a hyphen for the dash). | Added after the branch review. Returns are copied into the ledger by a controller; a line read as "no outcome" made `next` repeat an action for ever, which is the loop the owner ruled out. A stopped pass is reported. |
+| **Q18** | **A re-check has a third outcome, `not rechecked`.** The fix is listed in the report as fixed, not re-checked. | Added after the branch review. With only `confirmed` and `still broken`, a walker that could not repeat the steps had to claim a verdict it did not have. |
+| **Q19** | **A re-dispatched fixer looks for its commit from base**, not from its own start commit. | Added after the branch review. The start commit of a second dispatch already contains the first one's commit. |
+
+Q1 to Q3 are the owner's decisions. Q4 to Q19 are the designer's, open to correction.
 
 ---
 
