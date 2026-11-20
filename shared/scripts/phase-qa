@@ -18,6 +18,14 @@
 #   next      print the one action the ledger allows next; write nothing
 #   close     append 'qa: done — <summary>', counted from the ledger, and
 #             print it
+#   land SHA  fast-forward base to the QA branch in the main checkout, only
+#             when the ledger's last 'qa: verified' line passed exactly SHA;
+#             record 'qa: landed (<sha>)', push base, leave the integration
+#             worktree on the base tip, detached, and delete the QA branch.
+#             Checks run before anything moves. Re-run after an interruption,
+#             it finishes the landing
+#   push      push the QA branch as a backup of fixes that did not land; a
+#             failed push is recorded, never fatal (as phase-push)
 #   status    print the pass's stage for the status line, '<stage>' or
 #             '<stage><TAB><done><TAB><total>', or nothing when no pass is
 #             active; write nothing, always exit 0
@@ -77,15 +85,24 @@
 # Exit codes:
 #   0   done
 #   2   usage error, or no ledger
+#   11  land: main checkout not clean
+#   13  land: main checkout is not on BASE
 #   14  open: the QA branch exists and the ledger does not account for it
-#   17  open: a batch is still open; close: 'qa: done' is already recorded
-#   18  close: the pass is not over
+#   17  open: a batch is still open; close: 'qa: done' is already recorded;
+#       land: the ledger already records the landing
+#   18  close: the pass is not over; land, push: the QA branch does not exist
+#   19  land: SHA is not a commit, or the QA branch is not at it
+#   20  land: the fast-forward failed; base unchanged
+#   21  land: base moved past what the QA branch was built on
+#   22  land: the ledger does not show SHA as verified
 #
-# Usage: phase-qa DESIGN_DOC BASE open|next|close|status
+# Usage: phase-qa DESIGN_DOC BASE open|next|close|push|status
+#        phase-qa DESIGN_DOC BASE land SHA
 set -euo pipefail
 
 usage() {
-  echo "usage: phase-qa DESIGN_DOC BASE open|next|close|status" >&2
+  echo "usage: phase-qa DESIGN_DOC BASE open|next|close|push|status" >&2
+  echo "       phase-qa DESIGN_DOC BASE land SHA" >&2
   exit 2
 }
 
@@ -95,7 +112,8 @@ base=$2
 sub=$3
 shift 3
 case "$sub" in
-  open | next | close | status) [ "$#" -eq 0 ] || usage ;;
+  open | next | close | push | status) [ "$#" -eq 0 ] || usage ;;
+  land) [ "$#" -eq 1 ] || usage ;;
   *) usage ;;
 esac
 # The status line calls 'status' on every refresh: whatever goes wrong, it
@@ -353,6 +371,82 @@ compute() { # compute MODE
 }
 
 case "$sub" in
+  land)
+    verified=$1
+    if [ "$(git -C "$main" branch --show-current)" != "$base" ]; then
+      echo "main checkout $main is not on base '$base' (git switch $base)" >&2
+      exit 13
+    fi
+    if [ -n "$(git -C "$main" status --porcelain)" ]; then
+      echo "main checkout not clean: landing would carry unverified changes (git status)" >&2
+      exit 11
+    fi
+    if grep -q '^qa: landed (' "$ledger"; then
+      echo "the QA fixes are already recorded as landed; reconcile the ledger and git log" >&2
+      exit 17
+    fi
+    if ! branch_exists; then
+      echo "QA branch '$branch' does not exist" >&2
+      exit 18
+    fi
+    if ! verified_sha=$(git -C "$main" rev-parse --verify --quiet "$verified^{commit}"); then
+      echo "verified SHA '$verified' is not a commit in this repository" >&2
+      exit 19
+    fi
+    if [ "$(git -C "$main" rev-parse "refs/heads/$branch")" != "$verified_sha" ]; then
+      echo "QA branch '$branch' is not at the verified $(git -C "$main" rev-parse --short "$verified_sha"): verify it again before landing" >&2
+      exit 19
+    fi
+    if ! git -C "$main" merge-base --is-ancestor "$base" "$verified_sha"; then
+      echo "base '$base' moved past what '$branch' was built on: the QA fixes cannot land" >&2
+      exit 21
+    fi
+    passed=$(grep '^qa: verified ' "$ledger" | tail -n 1 | sed -n 's/^qa: verified PASS — //p' | awk '{ print $1 }' || true)
+    if [ -z "$passed" ] \
+      || [ "$(git -C "$main" rev-parse --verify --quiet "$passed^{commit}" || true)" != "$verified_sha" ]; then
+      echo "the ledger shows no passing gates for $(git -C "$main" rev-parse --short "$verified_sha"): verify the QA branch before landing" >&2
+      exit 22
+    fi
+    # Re-run after an interruption, base may already be at the QA tip: the
+    # fast-forward is skipped and only what the ledger lacks is recorded.
+    if [ "$(git -C "$main" rev-parse HEAD)" != "$verified_sha" ]; then
+      before=$(git -C "$main" rev-parse HEAD)
+      if ! git -C "$main" merge -q --ff-only "$branch" >/dev/null 2>&1; then
+        git -C "$main" reset -q --hard "$before"
+        echo "fast-forward of '$base' to '$branch' failed; base unchanged" >&2
+        exit 20
+      fi
+    fi
+    short=$(git -C "$main" rev-parse --short HEAD)
+    printf 'qa: landed (%s)\n' "$short" >> "$ledger"
+    echo "qa landed on $base ($short)"
+    "$here/phase-push" "$doc" "$base" base >/dev/null || true
+    # The re-check walks the landed tree; the branch has served its purpose.
+    if registered "$wt" && [ -d "$wt" ]; then
+      reset_tracked
+      git -C "$wt" switch -q --detach "refs/heads/$base"
+    fi
+    git -C "$main" branch -q -d "$branch" >/dev/null 2>&1 || true
+    ;;
+  push)
+    if ! branch_exists; then
+      echo "QA branch '$branch' does not exist" >&2
+      exit 18
+    fi
+    short=$(git -C "$main" rev-parse --short "refs/heads/$branch")
+    set +e
+    err=$(GIT_TERMINAL_PROMPT=0 git -C "$main" push -q origin "refs/heads/$branch:refs/heads/$branch" 2>&1 </dev/null)
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      line="push: $branch at $short"
+    else
+      reason=$(printf '%s\n' "$err" | grep -v '^ *$' | head -n 1 | sed 's/^error: //; s/^fatal: //')
+      line="push: $branch failed — ${reason:-git push exited $rc}"
+    fi
+    printf '%s\n' "$line" >> "$ledger"
+    printf '%s\n' "$line"
+    ;;
   next) compute next ;;
   status) compute status ;;
   close)

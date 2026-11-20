@@ -200,4 +200,76 @@ nx 'done' 'a planner skip ends the pass'
 log 'run: qa scope — top 3'
 nx 'open' 'the owner asking again supersedes the skip, and the pass starts over from open'
 
+# --- land ---------------------------------------------------------------------------
+
+reset_ledger 'run: qa scope — all'
+qa open
+commit_in "$iwt" fix.txt fix
+f=$(tip phase-qa-spec)
+qa land "$f"
+assert_rc 22 'land: refuses a commit the ledger does not show as verified'
+log 'qa: verified FAIL — unit suite'
+qa land "$f"
+assert_rc 22 'land: a FAIL is not a PASS'
+log "qa: verified PASS — $f"
+printf 'stray\n' > "$repo/stray.txt"
+qa land "$f"
+assert_rc 11 'land: refuses a dirty main checkout'
+rm "$repo/stray.txt"
+qa land "$(tip feat/x)"
+assert_rc 19 'land: refuses a commit the QA branch is not at'
+qa land "$f"
+assert_rc 0 'land: exits 0'
+assert_eq "qa landed on feat/x ($f)" "$OUT" 'land: prints what landed'
+assert_eq "$f" "$(tip feat/x)" 'land: base is at the verified commit'
+assert_contains "qa: landed ($f)" "$(cat "$ledger")" 'land: recorded'
+assert_contains "push: feat/x at $f" "$(cat "$ledger")" 'land: base is pushed'
+assert_eq '' "$(git -C "$iwt" branch --show-current)" 'land: the integration worktree is detached'
+assert_eq "$f" "$(git -C "$iwt" rev-parse --short HEAD)" 'land: the integration worktree is on the base tip'
+assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: the QA branch is deleted'
+qa land "$f"
+assert_rc 17 'land: refuses a second landing'
+
+# Interrupted after the fast-forward, before the ledger line.
+reset_ledger 'run: qa scope — all'
+qa open
+commit_in "$iwt" fix2.txt fix2
+f2=$(tip phase-qa-spec)
+log "qa: verified PASS — $f2"
+git -C "$repo" merge -q --ff-only phase-qa-spec
+qa land "$f2"
+assert_rc 0 'land: a re-run after an interruption finishes the landing'
+assert_contains "qa: landed ($f2)" "$(cat "$ledger")" 'land: the re-run records it'
+
+# --- push ---------------------------------------------------------------------------
+
+reset_ledger 'run: qa scope — all'
+qa push
+assert_rc 18 'push: refuses when there is no QA branch'
+qa open
+commit_in "$iwt" fix3.txt fix3
+f3=$(tip phase-qa-spec)
+qa push
+assert_rc 0 'push: exits 0'
+assert_eq "push: phase-qa-spec at $f3" "$OUT" 'push: prints what it pushed'
+assert_eq "$(git -C "$repo" rev-parse phase-qa-spec)" "$(git -C "$origin" rev-parse refs/heads/phase-qa-spec)" 'push: origin holds the QA branch'
+assert_contains "push: phase-qa-spec at $f3" "$(cat "$ledger")" 'push: recorded'
+git -C "$repo" remote rename origin away
+qa push
+assert_rc 0 'push: a failed push still exits 0'
+assert_contains 'push: phase-qa-spec failed — ' "$OUT" 'push: the failure is recorded'
+git -C "$repo" remote rename away origin
+
+# --- land: the main checkout is elsewhere, or base moved ----------------------------
+
+log "qa: verified PASS — $f3"
+git -C "$repo" switch -q -c elsewhere
+qa land "$f3"
+assert_rc 13 'land: refuses when the main checkout is not on base'
+git -C "$repo" switch -q feat/x
+commit_in "$repo" moved.txt moved
+qa land "$f3"
+assert_rc 21 'land: refuses when base moved past what the QA branch was built on'
+assert_eq 'yes' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: a refusal keeps the QA branch'
+
 finish
