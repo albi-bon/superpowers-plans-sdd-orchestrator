@@ -22,7 +22,7 @@ exists() {
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
 repair-prompt.md rescue-prompt.md overlap-judge-prompt.md'
 INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md qa-plan-prompt.md
-qa-walker-prompt.md'
+qa-walker-prompt.md qa-triage-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES $INTEGRATION_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
@@ -294,7 +294,27 @@ has qa-walker-prompt.md '] G1' 'writes the recheck lines the report reads'
 has qa-walker-prompt.md 'WALKED or NOT_WALKED' 'returns whether the flow was walked'
 has qa-walker-prompt.md 'RECHECKED' 'returns the recheck outcome'
 has qa-walker-prompt.md 'four lines' 'return contract is capped'
-for t in qa-plan-prompt.md qa-walker-prompt.md; do
+# --- qa-triage-prompt.md -----------------------------------------------------
+
+exists qa-triage-prompt.md
+has qa-triage-prompt.md 'top tier, the most capable model available' 'triage is top tier'
+has qa-triage-prompt.md 'FINDINGS_PATHS' 'receives every findings file'
+has qa-triage-prompt.md 'TRIAGE_PATH' 'writes one triage file'
+has qa-triage-prompt.md 'share a cause' 'groups findings by cause'
+has qa-triage-prompt.md 'exactly one of' 'every group has one class'
+has qa-triage-prompt.md 'what the design document or a recorded decision asked for' 'defines the spec class'
+has qa-triage-prompt.md 'Nothing is changed for a `spec` group' 'a spec group is reported, not fixed'
+has qa-triage-prompt.md 'proposed:' 'a spec group carries a proposed change'
+has qa-triage-prompt.md 'outside this run' 'has the outside-this-run class'
+has qa-triage-prompt.md 'a phase outside PHASES is meant to deliver' 'unrequested phases are outside the run'
+has qa-triage-prompt.md 'merge them or place one after the other' 'fix groups never collide'
+has qa-triage-prompt.md 'the regression test to add' 'each fix plan names its test'
+has qa-triage-prompt.md 'Do not walk anything again' 'triage does not reopen discovery'
+has qa-triage-prompt.md 'fix: G1@2 G3@2,5' 'returns the groups with their flows, in fix order'
+has qa-triage-prompt.md 'Read only. You write TRIAGE_PATH and nothing else' 'is read-only'
+has qa-triage-prompt.md 'five lines' 'return contract is capped'
+
+for t in qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md; do
   assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/$t" || true)" \
     "$t: decides a verdict, not implementation, so takes no decision policy"
 done
