@@ -6,7 +6,7 @@ end to end, unattended, one branch per phase, merging each into a base branch:
 | Skill | Use it for | Per phase |
 |---|---|---|
 | `building-phased-specs` | Design documents that are already researched and decided — the everyday path | a scout grounds the phase and writes a short brief; a phase lead has one worker build each task, one reviewer review the branch, and a fix wave apply the accepted findings; a verifier checks gates and deliverables |
-| `building-phased-specs-in-parallel` | The same per-phase work, when the document's phases form a graph rather than a chain | as `building-phased-specs`, but every phase whose `Depends on` phases have landed starts at once (up to 3 by default) in its own git worktree; a phase sharing code files with one in flight goes to an overlap judge, which holds it only when both make major changes to the same domain; built phases queue, and whenever the verifier is free every queued phase is merged onto one batch branch off base, conflicts resolved, and the combined tree is verified once — gates and acceptance check — then lands and base is pushed; a failure is pinned on one phase, which gets a repair and a rescue while the rest land without it; the run ends with a pull request |
+| `building-phased-specs-in-parallel` | The same per-phase work, when the document's phases form a graph rather than a chain | as `building-phased-specs`, but every phase whose `Depends on` phases have landed starts at once (up to 3 by default) in its own git worktree; a phase sharing code files with one in flight goes to an overlap judge, which holds it only when both make major changes to the same domain; built phases queue, and whenever the verifier is free every queued phase is merged onto one batch branch off base, conflicts resolved, and the combined tree is verified once — gates and acceptance check — then lands and base is pushed; a failure is pinned on one phase, which gets a repair and a rescue while the rest land without it; on request, a QA pass then uses the finished work as a user would, fixes what it finds once and reports the rest; the run ends with a pull request |
 | `orchestrating-phased-specs` | Exploratory specs that benefit from a full implementation plan | writes a Superpowers plan, executes it with `subagent-driven-development`, verifies |
 | `executing-phased-specs` | The same plan-driven path, trying inline execution | writes a Superpowers plan; one executor implements every task itself with `executing-plans`, then dispatches one fresh reviewer over the phase and runs one fix round; verifies |
 
@@ -44,7 +44,7 @@ authenticated `gh` for the pull request. Read
 each skill's `platform-guide.md` for dispatch, model mapping and permissions.
 
 To follow a parallel run from Claude Code's status line (merged, building,
-queued, the open batch, repairing, held, left), add
+queued, the open batch, repairing, held, left, the QA pass), add
 `skills/building-phased-specs-in-parallel/scripts/phase-statusline` to your
 status line command; see that skill's `platform-guide.md`.
 
@@ -54,10 +54,15 @@ Invoking by name is deterministic:
 
 ```
 /building-phased-specs phases 2 to 6 of docs/specs/example-design.md on branch feat/example
-/building-phased-specs-in-parallel phases 2 to 6 of docs/specs/example-design.md on branch feat/example up to 3 in parallel
+/building-phased-specs-in-parallel phases 2 to 6 of docs/specs/example-design.md on branch feat/example up to 3 in parallel, qa
 /orchestrating-phased-specs phases 2 to 6 of docs/specs/example-design.md on branch feat/example
 /executing-phased-specs phases 2 to 6 of docs/specs/example-design.md on branch feat/example
 ```
+
+For the parallel skill, `qa`, `qa: top N`, `qa: all` or `qa: <flows in words>`
+turns on the QA pass at the end of the run, and `no qa` declines it. A request
+that says neither is asked once, before the run starts. Bare `qa` covers the
+five most important flows.
 
 In Codex, mention the skill as `$building-phased-specs`. With looser wording —
 "work on phases 2 to 6 of …" — the descriptions route to
@@ -73,7 +78,7 @@ those plans executed inline or name it.
 shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
                          phase-overlap, phase-worktree, phase-batch, phase-land, phase-push, phase-pr,
-                         phase-statusline
+                         phase-qa, phase-statusline
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill
 skills/<name>/           SKILL.md, dispatch templates, platform guide
 skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace

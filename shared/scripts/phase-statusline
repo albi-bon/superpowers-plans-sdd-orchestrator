@@ -25,6 +25,9 @@
 #   failed     ladder spent
 #   left       requested and not started yet
 #   draining   a phase failed; nothing new starts
+#   qa         the QA pass, once it has opened: its stage (planning, walking,
+#              triaging, fixing, verifying, landing, rechecking), and for
+#              walking, fixing and rechecking how many of how many are done
 #   idle       time since the ledger last changed, when over 15 minutes
 # Counts of zero are left out. '+N runs' means other runs are also active.
 #
@@ -78,7 +81,11 @@ case "$doc" in /*) ;; *) doc="$main/$doc" ;; esac
 requested=$(cd "$main" && "$here/parse-phases" "$doc" "$range" 2>/dev/null | cut -f1 | tr '\n' ' ')
 state=$(cd "$main" && PHASE_RUN_NAMESPACE=$namespace "$here/phase-state" "$doc" 2>/dev/null) || exit 0
 
-REQUESTED=$requested STATE=$state BASE=$base AGE=$((now - best_t)) OTHERS=$others awk '
+# The QA pass's stage, from phase-qa. Whatever goes wrong there, the line is
+# printed without it.
+qa=$(cd "$main" && PHASE_RUN_NAMESPACE=$namespace "$here/phase-qa" "$doc" "$base" status 2>/dev/null) || qa=""
+
+QA=$qa REQUESTED=$requested STATE=$state BASE=$base AGE=$((now - best_t)) OTHERS=$others awk '
   BEGIN {
     n = split(ENVIRON["REQUESTED"], req, " ")
     for (i = 1; i <= n; i++) if (req[i] != "") { want[req[i]] = 1; total++ }
@@ -114,6 +121,11 @@ REQUESTED=$requested STATE=$state BASE=$base AGE=$((now - best_t)) OTHERS=$other
     if (held) out = out " · " held " held"
     if (failed) out = out " · " failed " failed"
     if (left) out = out " · " left " left"
+    nq = split(ENVIRON["QA"], qf, "\t")
+    if (qf[1] ~ /^(planning|walking|triaging|fixing|verifying|landing|rechecking)$/) {
+      out = out " · qa " qf[1]
+      if (nq == 3) out = out " " qf[2] "/" qf[3]
+    }
     age = ENVIRON["AGE"] + 0
     if (age > 900) {
       if (age < 3600) out = out " · idle " int(age / 60) "m"

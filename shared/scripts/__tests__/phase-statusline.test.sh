@@ -81,4 +81,35 @@ log 'RUN COMPLETE — phases 1–7 of spec.md'
 line "$repo"
 assert_eq '' "$OUT" 'a finished run is not shown'
 
+# --- the QA pass --------------------------------------------------------------------
+
+printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\n' "$repo/spec.md" > "$ledger"
+log 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' 'batch 1: landed (aaa1)'
+line "$repo"
+assert_eq 'feat/x · 2/2 merged' "$OUT" 'no QA segment before the pass opens'
+log 'qa: opened — phase-qa-spec at aaa1'
+line "$repo"
+assert_eq 'feat/x · 2/2 merged · qa planning' "$OUT" 'a QA stage without counts'
+log 'qa: flows defined — 3 found, selected 1,2,3, not walkable -, parallel yes' 'qa flow 1: walked — 0 findings'
+line "$repo"
+assert_eq 'feat/x · 2/2 merged · qa walking 1/3' "$OUT" 'a QA stage with progress'
+
+# A phase-qa that fails must never take the status line down with it. The
+# status line finds its siblings beside itself, so a copy gets a stand-in.
+fake="$tmp/fake-scripts"
+mkdir -p "$fake"
+cp "$here"/../parse-phases "$here"/../phase-state "$here"/../phase-run-dir "$here"/../phase-statusline "$fake"/
+printf '#!/usr/bin/env bash\necho boom\necho boom >&2\nexit 3\n' > "$fake/phase-qa"
+chmod +x "$fake/phase-qa"
+set +e
+OUT=$(json "$repo" | "$fake/phase-statusline" 2>&1)
+RC=$?
+set -e
+assert_rc 0 'a failing phase-qa never fails the status line'
+assert_eq 'feat/x · 2/2 merged' "$OUT" 'a failing phase-qa leaves the QA segment out'
+
+log 'qa: done — abandoned, base moved under the pass'
+line "$repo"
+assert_eq 'feat/x · 2/2 merged' "$OUT" 'no QA segment once the pass is done'
+
 finish

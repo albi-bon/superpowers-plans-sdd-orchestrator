@@ -21,7 +21,8 @@ exists() {
 # worktree batches are built in.
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
 repair-prompt.md rescue-prompt.md overlap-judge-prompt.md'
-INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md'
+INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md qa-plan-prompt.md
+qa-walker-prompt.md qa-triage-prompt.md qa-fix-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES $INTEGRATION_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
@@ -253,6 +254,100 @@ for t in scout-prompt.md lead-prompt.md; do
     "$t: no most-capable wording left on a strong-tier role"
 done
 
+# --- qa-plan-prompt.md -------------------------------------------------------
+
+exists qa-plan-prompt.md
+has qa-plan-prompt.md 'top tier, the most capable model available' 'the QA planner is top tier'
+has qa-plan-prompt.md 'QA_SCOPE' 'receives the scope'
+has qa-plan-prompt.md 'FLOWS_PATH' 'writes the flows file'
+has qa-plan-prompt.md 'SETUP_MARKER' 'installs dependencies only when they changed'
+has qa-plan-prompt.md 'the outermost interface a real user touches' 'defines a flow by what a user touches, not by a product type'
+has qa-plan-prompt.md 'Start the product once yourself' 'proves the product starts before any walker tries'
+has qa-plan-prompt.md 'at most three edge cases' 'caps the edge cases'
+has qa-plan-prompt.md 'not walkable — <why>' 'a flow no tool can drive is marked, not dropped'
+has qa-plan-prompt.md 'needs phase <N>, not in this run' 'a flow that needs an unrequested phase is not walkable'
+has qa-plan-prompt.md 'Rank every flow' 'lists every flow, selects by scope'
+has qa-plan-prompt.md 'match no flow' 'says when the owner words match nothing'
+has qa-plan-prompt.md '] F2 — checkout' 'writes the index the report reads'
+has qa-plan-prompt.md 'parallel: yes' 'says whether walkers can run side by side'
+has qa-plan-prompt.md 'selected: <flow numbers' 'returns the selected flow numbers'
+has qa-plan-prompt.md 'numbers only, without the F' 'returns bare numbers for the ledger'
+has qa-plan-prompt.md 'Do NOT edit source files' 'the planner changes no code'
+has qa-plan-prompt.md 'six lines' 'return contract is capped'
+
+# --- qa-walker-prompt.md -----------------------------------------------------
+
+exists qa-walker-prompt.md
+has qa-walker-prompt.md 'model: strong tier' 'the walker is strong tier'
+has qa-walker-prompt.md 'MODE "walk"' 'has a walk mode'
+has qa-walker-prompt.md 'MODE "recheck"' 'has a recheck mode'
+has qa-walker-prompt.md 'the way a real user would' 'uses the product as a user'
+has qa-walker-prompt.md 'never counts as walking' 'reading code or running tests is not walking'
+has qa-walker-prompt.md 'not walked — <why>' 'a scenario the tool cannot drive is not walked'
+has qa-walker-prompt.md 'Record it and move on' 'a finding is recorded, not diagnosed'
+has qa-walker-prompt.md 'Add no scenario of your own' 'the scenario list is fixed'
+has qa-walker-prompt.md 'not walked — blocked by' 'a blocking finding ends the flow without guessing'
+has qa-walker-prompt.md 'Severity: `broken`' 'records a severity'
+has qa-walker-prompt.md 'Do NOT fix anything or edit source files' 'the walker fixes nothing'
+has qa-walker-prompt.md 'only the steps of those findings' 'a recheck repeats only the fixed findings'
+has qa-walker-prompt.md 'do not investigate it' 'a new observation at recheck is one line'
+has qa-walker-prompt.md '] G1' 'writes the recheck lines the report reads'
+has qa-walker-prompt.md 'WALKED or NOT_WALKED' 'returns whether the flow was walked'
+has qa-walker-prompt.md 'RECHECKED' 'returns the recheck outcome'
+has qa-walker-prompt.md 'G2 not rechecked' 'a re-check that cannot be done says so instead of claiming a verdict'
+has qa-walker-prompt.md '] G2 — <why' 'writes the not-rechecked line'
+has qa-walker-prompt.md 'four lines' 'return contract is capped'
+# --- qa-triage-prompt.md -----------------------------------------------------
+
+exists qa-triage-prompt.md
+has qa-triage-prompt.md 'top tier, the most capable model available' 'triage is top tier'
+has qa-triage-prompt.md 'FINDINGS_PATHS' 'receives every findings file'
+has qa-triage-prompt.md 'TRIAGE_PATH' 'writes one triage file'
+has qa-triage-prompt.md 'share a cause' 'groups findings by cause'
+has qa-triage-prompt.md 'exactly one of' 'every group has one class'
+has qa-triage-prompt.md 'what the design document or a recorded decision asked for' 'defines the spec class'
+has qa-triage-prompt.md 'Nothing is changed for a `spec` group' 'a spec group is reported, not fixed'
+has qa-triage-prompt.md 'proposed:' 'a spec group carries a proposed change'
+has qa-triage-prompt.md 'outside this run' 'has the outside-this-run class'
+has qa-triage-prompt.md 'a phase outside PHASES is meant to deliver' 'unrequested phases are outside the run'
+has qa-triage-prompt.md 'merge them or place one after the other' 'fix groups never collide'
+has qa-triage-prompt.md 'the regression test to add' 'each fix plan names its test'
+has qa-triage-prompt.md 'Do not walk anything again' 'triage does not reopen discovery'
+has qa-triage-prompt.md 'fix: G1@2 G3@2,5' 'returns the groups with their flows, in fix order'
+has qa-triage-prompt.md 'Read only. You write TRIAGE_PATH and nothing else' 'is read-only'
+has qa-triage-prompt.md 'five lines' 'return contract is capped'
+
+# --- qa-fix-prompt.md --------------------------------------------------------
+
+exists qa-fix-prompt.md
+has qa-fix-prompt.md 'top tier, the most capable model available' 'the QA fixer is top tier'
+has qa-fix-prompt.md 'GROUP_NUMBER' 'fixes one group'
+has qa-fix-prompt.md 'TESTING_POLICY_PATH' 'receives the testing policy'
+has qa-fix-prompt.md 'You get one attempt' 'one attempt'
+has qa-fix-prompt.md 'already has a commit whose subject starts with' 'a fixer dispatched again finds its own commit'
+has qa-fix-prompt.md 'git log BASE..HEAD' 'looks for its commit from base, since a later dispatch starts after it'
+has qa-fix-prompt.md 'Reproduce the finding first' 'reproduces before fixing'
+has qa-fix-prompt.md 'weakening, skipping, or deleting the check' 'never weakens a check'
+has qa-fix-prompt.md 'Do not run a whole suite' 'leaves the full suites to the gates'
+has qa-fix-prompt.md 'changing what the design document asked for' 'a spec change is not a fix'
+has qa-fix-prompt.md 'Other groups are not yours' 'stays inside its group'
+has qa-fix-prompt.md 'leave QA_BRANCH at START_SHA' 'a failed attempt leaves the branch where it was'
+has qa-fix-prompt.md 'FIXED <short commit SHA> or NOT_FIXED' 'returns FIXED with the SHA, or NOT_FIXED'
+has qa-fix-prompt.md 'five lines' 'return contract is capped'
+
+has integration-verifier-prompt.md "or the QA branch's tip" 'final mode also covers the gates on QA fixes'
+
+has platform-guide.md 'resolver; QA planner, QA triage, QA fixer' 'the QA judgement roles are top tier'
+has platform-guide.md '| strong | scout, phase lead, QA walker' 'the QA walker is strong tier'
+has platform-guide.md 'the gates on QA fixes' 'the verifier also runs the gates on QA fixes'
+has platform-guide.md '## The QA pass' 'says what the QA pass needs from the host'
+has platform-guide.md 'A tool that prompts parks the run' 'interaction tools must be permitted beforehand'
+
+for t in qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md; do
+  assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/$t" || true)" \
+    "$t: decides a verdict, not implementation, so takes no decision policy"
+done
+
 # --- rules binding on every template --------------------------------------
 
 for t in $TEMPLATES; do
@@ -284,7 +379,7 @@ for t in $INTEGRATION_TEMPLATES; do
 done
 
 for t in scout-prompt.md lead-prompt.md worker-prompt.md repair-prompt.md \
-         rescue-prompt.md resolver-prompt.md; do
+         rescue-prompt.md resolver-prompt.md qa-fix-prompt.md; do
   has "$t" 'DECISION_POLICY_PATH' 'receives the decision policy'
 done
 
