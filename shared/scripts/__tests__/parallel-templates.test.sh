@@ -21,7 +21,8 @@ exists() {
 # worktree batches are built in.
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
 repair-prompt.md rescue-prompt.md overlap-judge-prompt.md'
-INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md'
+INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md qa-plan-prompt.md
+qa-walker-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES $INTEGRATION_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
@@ -251,6 +252,51 @@ has platform-guide.md "The session's own model does not change" 'the session mod
 for t in scout-prompt.md lead-prompt.md; do
   assert_eq '' "$(grep -n 'most capable' "$ROOT/$t" || true)" \
     "$t: no most-capable wording left on a strong-tier role"
+done
+
+# --- qa-plan-prompt.md -------------------------------------------------------
+
+exists qa-plan-prompt.md
+has qa-plan-prompt.md 'top tier, the most capable model available' 'the QA planner is top tier'
+has qa-plan-prompt.md 'QA_SCOPE' 'receives the scope'
+has qa-plan-prompt.md 'FLOWS_PATH' 'writes the flows file'
+has qa-plan-prompt.md 'SETUP_MARKER' 'installs dependencies only when they changed'
+has qa-plan-prompt.md 'the outermost interface a real user touches' 'defines a flow by what a user touches, not by a product type'
+has qa-plan-prompt.md 'Start the product once yourself' 'proves the product starts before any walker tries'
+has qa-plan-prompt.md 'at most three edge cases' 'caps the edge cases'
+has qa-plan-prompt.md 'not walkable — <why>' 'a flow no tool can drive is marked, not dropped'
+has qa-plan-prompt.md 'needs phase <N>, not in this run' 'a flow that needs an unrequested phase is not walkable'
+has qa-plan-prompt.md 'Rank every flow' 'lists every flow, selects by scope'
+has qa-plan-prompt.md 'match no flow' 'says when the owner words match nothing'
+has qa-plan-prompt.md '] F2 — checkout' 'writes the index the report reads'
+has qa-plan-prompt.md 'parallel: yes' 'says whether walkers can run side by side'
+has qa-plan-prompt.md 'selected: <flow numbers' 'returns the selected flow numbers'
+has qa-plan-prompt.md 'Do NOT edit source files' 'the planner changes no code'
+has qa-plan-prompt.md 'six lines' 'return contract is capped'
+
+# --- qa-walker-prompt.md -----------------------------------------------------
+
+exists qa-walker-prompt.md
+has qa-walker-prompt.md 'model: strong tier' 'the walker is strong tier'
+has qa-walker-prompt.md 'MODE "walk"' 'has a walk mode'
+has qa-walker-prompt.md 'MODE "recheck"' 'has a recheck mode'
+has qa-walker-prompt.md 'the way a real user would' 'uses the product as a user'
+has qa-walker-prompt.md 'never counts as walking' 'reading code or running tests is not walking'
+has qa-walker-prompt.md 'not walked — <why>' 'a scenario the tool cannot drive is not walked'
+has qa-walker-prompt.md 'Record it and move on' 'a finding is recorded, not diagnosed'
+has qa-walker-prompt.md 'Add no scenario of your own' 'the scenario list is fixed'
+has qa-walker-prompt.md 'not walked — blocked by' 'a blocking finding ends the flow without guessing'
+has qa-walker-prompt.md 'Severity: `broken`' 'records a severity'
+has qa-walker-prompt.md 'Do NOT fix anything or edit source files' 'the walker fixes nothing'
+has qa-walker-prompt.md 'only the steps of those findings' 'a recheck repeats only the fixed findings'
+has qa-walker-prompt.md 'do not investigate it' 'a new observation at recheck is one line'
+has qa-walker-prompt.md '] G1' 'writes the recheck lines the report reads'
+has qa-walker-prompt.md 'WALKED or NOT_WALKED' 'returns whether the flow was walked'
+has qa-walker-prompt.md 'RECHECKED' 'returns the recheck outcome'
+has qa-walker-prompt.md 'four lines' 'return contract is capped'
+for t in qa-plan-prompt.md qa-walker-prompt.md; do
+  assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/$t" || true)" \
+    "$t: decides a verdict, not implementation, so takes no decision policy"
 done
 
 # --- rules binding on every template --------------------------------------
