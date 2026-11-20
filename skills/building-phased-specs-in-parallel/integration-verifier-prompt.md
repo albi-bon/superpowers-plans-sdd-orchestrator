@@ -6,6 +6,8 @@ included. It runs the gates and the acceptance check on the batch tip, which is
 exactly the tree that lands, and when something fails it pins the failure on
 the phase that caused it. Dispatched once more at the end of the run, in
 `final` mode, to run the full suites on the base tip before the pull request.
+When the optional QA pass fixed anything, the same `final` mode runs the gates
+on the QA branch before those fixes land.
 
 Verifying a batch once, rather than each phase after its own merge, saves the
 slow suites whenever several phases finish while a verification is running.
@@ -33,7 +35,7 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
 
     Mode:              MODE                  ("batch", or "final" for the run's last check of BASE)
     Design document:   DESIGN_DOC
-    Batch:             BATCH_NUMBER on BATCH_BRANCH (checked out in WORKTREE; in final mode WORKTREE is at BASE's tip, detached)
+    Batch:             BATCH_NUMBER on BATCH_BRANCH (checked out in WORKTREE; in final mode WORKTREE is at BASE's tip, detached, or the QA branch's tip)
     Base branch:       BASE
     Phases:            BATCH_PHASES          (one line per phase: number, title, brief path, decisions path; "none" in final mode)
     Setup command:     SETUP_COMMAND

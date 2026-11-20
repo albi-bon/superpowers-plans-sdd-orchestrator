@@ -55,9 +55,9 @@ artifact paths; never rely on an inherited working directory.
 
 | Tier | Roles |
 |---|---|
-| top | overlap judge, reviewer, repair, rescue, resolver; scout in the cases under Scout tier below; worker on a task the brief marks `Tier: hard`; fix worker whose findings touch a file of a `Tier: hard` task |
-| strong | scout, phase lead; worker on a task the brief marks `Tier: standard` or gives no Tier line; every other fix worker |
-| mid-tier | worker on a task the brief marks `Tier: mechanical`; integration verifier (gates and acceptance check, once per batch; the final check); graph agent |
+| top | overlap judge, reviewer, repair, rescue, resolver; QA planner, QA triage, QA fixer; scout in the cases under Scout tier below; worker on a task the brief marks `Tier: hard`; fix worker whose findings touch a file of a `Tier: hard` task |
+| strong | scout, phase lead, QA walker; worker on a task the brief marks `Tier: standard` or gives no Tier line; every other fix worker |
+| mid-tier | worker on a task the brief marks `Tier: mechanical`; integration verifier (gates and acceptance check, once per batch; the final check; the gates on QA fixes); graph agent |
 
 The top tier is the most capable model the host offers. It takes the work
 that costs the most when it is wrong: judgement calls on a whole phase, and
@@ -130,6 +130,32 @@ when there is one.
 Several phases building at once share one machine's cores. Cap the test
 runner's worker count per worktree in the repository's own configuration, or
 suites slow each other past tool timeouts and flake.
+
+## The QA pass
+
+The optional QA pass (SKILL.md § The QA pass) uses the finished work the way a
+user would, so it needs more from the host than building does.
+
+- **Interaction tools.** The walkers use whatever this session offers its
+  sub-agents: the shell for a command-line tool or an HTTP API, a browser
+  automation server for a web page, a simulator or emulator and its command
+  line for a mobile app, control of the desktop for anything else. The skill
+  names none of them; the QA planner lists what it finds and marks a flow
+  nothing can drive as not walkable. Make the tools the project needs
+  available to sub-agents, and allow them in the session's permissions, before
+  an unattended run. A tool that prompts parks the run, like any other missing
+  permission.
+- **Running the product.** The planner starts the product in the integration
+  worktree, and walkers start it again there. When several instances cannot
+  run side by side (one fixed port, one shared database), the planner returns
+  `parallel: no` and the walkers go one at a time.
+- **Capacity.** At most `CAP` walkers run at once, and every other QA agent
+  runs alone, so the pass stays inside the `1 + 2 × CAP` agents the run
+  already needs.
+- **Cost.** A planner, a walker per flow, a triage agent, a fixer per group of
+  findings, one more run of the full suites when anything was fixed, and a
+  re-check walker per fixed flow. The owner bounds it with the scope in the
+  request: `qa: top N`, or flows named in words.
 
 ## Claude Code
 

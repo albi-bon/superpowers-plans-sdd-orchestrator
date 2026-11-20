@@ -22,7 +22,7 @@ exists() {
 WORKTREE_TEMPLATES='scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md
 repair-prompt.md rescue-prompt.md overlap-judge-prompt.md'
 INTEGRATION_TEMPLATES='resolver-prompt.md integration-verifier-prompt.md qa-plan-prompt.md
-qa-walker-prompt.md qa-triage-prompt.md'
+qa-walker-prompt.md qa-triage-prompt.md qa-fix-prompt.md'
 TEMPLATES="$WORKTREE_TEMPLATES $INTEGRATION_TEMPLATES graph-prompt.md"
 
 # --- policies --------------------------------------------------------------
@@ -314,6 +314,31 @@ has qa-triage-prompt.md 'fix: G1@2 G3@2,5' 'returns the groups with their flows,
 has qa-triage-prompt.md 'Read only. You write TRIAGE_PATH and nothing else' 'is read-only'
 has qa-triage-prompt.md 'five lines' 'return contract is capped'
 
+# --- qa-fix-prompt.md --------------------------------------------------------
+
+exists qa-fix-prompt.md
+has qa-fix-prompt.md 'top tier, the most capable model available' 'the QA fixer is top tier'
+has qa-fix-prompt.md 'GROUP_NUMBER' 'fixes one group'
+has qa-fix-prompt.md 'TESTING_POLICY_PATH' 'receives the testing policy'
+has qa-fix-prompt.md 'You get one attempt' 'one attempt'
+has qa-fix-prompt.md 'already has a commit whose subject starts with' 'a fixer dispatched again finds its own commit'
+has qa-fix-prompt.md 'Reproduce the finding first' 'reproduces before fixing'
+has qa-fix-prompt.md 'weakening, skipping, or deleting the check' 'never weakens a check'
+has qa-fix-prompt.md 'Do not run a whole suite' 'leaves the full suites to the gates'
+has qa-fix-prompt.md 'changing what the design document asked for' 'a spec change is not a fix'
+has qa-fix-prompt.md 'Other groups are not yours' 'stays inside its group'
+has qa-fix-prompt.md 'leave QA_BRANCH at START_SHA' 'a failed attempt leaves the branch where it was'
+has qa-fix-prompt.md 'FIXED <short commit SHA> or NOT_FIXED' 'returns FIXED with the SHA, or NOT_FIXED'
+has qa-fix-prompt.md 'five lines' 'return contract is capped'
+
+has integration-verifier-prompt.md "or the QA branch's tip" 'final mode also covers the gates on QA fixes'
+
+has platform-guide.md 'resolver; QA planner, QA triage, QA fixer' 'the QA judgement roles are top tier'
+has platform-guide.md '| strong | scout, phase lead, QA walker' 'the QA walker is strong tier'
+has platform-guide.md 'the gates on QA fixes' 'the verifier also runs the gates on QA fixes'
+has platform-guide.md '## The QA pass' 'says what the QA pass needs from the host'
+has platform-guide.md 'A tool that prompts parks the run' 'interaction tools must be permitted beforehand'
+
 for t in qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md; do
   assert_eq '' "$(grep -n 'DECISION_POLICY_PATH' "$ROOT/$t" || true)" \
     "$t: decides a verdict, not implementation, so takes no decision policy"
@@ -350,7 +375,7 @@ for t in $INTEGRATION_TEMPLATES; do
 done
 
 for t in scout-prompt.md lead-prompt.md worker-prompt.md repair-prompt.md \
-         rescue-prompt.md resolver-prompt.md; do
+         rescue-prompt.md resolver-prompt.md qa-fix-prompt.md; do
   has "$t" 'DECISION_POLICY_PATH' 'receives the decision policy'
 done
 
