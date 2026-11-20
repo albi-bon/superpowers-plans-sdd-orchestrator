@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# The QA pass at the end of a parallel run: the finished work is used the way
+# a real user would, what is found is fixed once, each fix is re-checked once,
+# and the rest goes into the report. This script owns the pass's state, so a
+# controller that lost its place cannot run a stage twice.
+#
+# The pass works in the run's integration worktree,
+# <main>/.worktrees/integration, on the QA branch phase-qa-<run>, where <run>
+# is the run directory's name: two runs in one repository never share it.
+# Fixes are committed there and reach base only through 'land', after the
+# ledger shows the integration verifier passed exactly that commit.
+#
+# Subcommands:
+#   open      put the integration worktree on the QA branch at the base tip
+#             (created, or re-attached with tracked changes discarded; a
+#             branch that holds no fix yet follows base), record
+#             'qa: opened — <branch> at <sha>', print 'opened <sha>'
+#
+# Exit codes:
+#   0   done
+#   2   usage error, or no ledger
+#   14  open: the QA branch exists and the ledger does not account for it
+#   17  open: a batch is still open
+#
+# Usage: phase-qa DESIGN_DOC BASE open
+set -euo pipefail
+
+usage() {
+  echo "usage: phase-qa DESIGN_DOC BASE open" >&2
+  exit 2
+}
+
+[ "$#" -ge 3 ] || usage
+doc=$1
+base=$2
+sub=$3
+shift 3
+case "$sub" in
+  open) [ "$#" -eq 0 ] || usage ;;
+  *) usage ;;
+esac
+
+here=$(cd "$(dirname "$0")" && pwd)
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+wt="$main/.worktrees/integration"
+rundir=$("$here/phase-run-dir" "$doc")
+ledger="$rundir/run.md"
+branch="phase-qa-$(basename "$rundir")"
+if [ ! -f "$ledger" ]; then
+  echo "no ledger at $ledger: run phase-preflight first" >&2
+  exit 2
+fi
+
+open_batch() { # the open batch's number, if any
+  "$here/phase-state" "$doc" | awk -F'\t' '
+    $1 == "batch" && ($3 == "open" || $3 == "conflict" || $3 == "built" || $3 == "landable") { print $2 }'
+}
+branch_exists() {
+  git -C "$main" show-ref --verify --quiet "refs/heads/$branch"
+}
+registered() {
+  git worktree list --porcelain | grep -qx "worktree $1"
+}
+ensure_worktree() {
+  if ! { registered "$wt" && [ -d "$wt" ]; }; then
+    git worktree prune
+    mkdir -p "$main/.worktrees"
+    printf '*\n' > "$main/.worktrees/.gitignore"
+    git worktree add -q --detach "$wt" "$base" >&2
+  fi
+}
+# Nothing uncommitted in the integration worktree is anyone's work: walkers
+# and verifiers commit nothing, and a fixer that was interrupted starts over
+# from the branch tip.
+reset_tracked() {
+  if [ -n "$(git -C "$wt" status --porcelain --untracked-files=no)" ]; then
+    git -C "$wt" reset -q --hard
+  fi
+}
+
+case "$sub" in
+  open)
+    ob=$(open_batch)
+    if [ -n "$ob" ]; then
+      echo "batch $ob is still open: land or fail it before the QA pass" >&2
+      exit 17
+    fi
+    if branch_exists && ! grep -qF -- "qa: opened — $branch at " "$ledger"; then
+      echo "branch '$branch' exists and this run's ledger does not account for it: delete it (git branch -D $branch) or resume the run it belongs to" >&2
+      exit 14
+    fi
+    ensure_worktree
+    reset_tracked
+    defined=no
+    if grep -q '^qa: flows defined' "$ledger"; then defined=yes; fi
+    if branch_exists; then
+      if [ "$(git -C "$wt" branch --show-current)" != "$branch" ]; then
+        git -C "$wt" switch -q "$branch"
+      fi
+      # Before the flows are defined the branch holds nothing of its own, so
+      # it follows a base that moved. Afterwards it is never moved.
+      if [ "$defined" = no ] \
+        && [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$main" rev-parse "refs/heads/$base")" ]; then
+        git -C "$wt" reset -q --hard "refs/heads/$base"
+      fi
+    else
+      git -C "$wt" switch -q -c "$branch" "refs/heads/$base"
+    fi
+    short=$(git -C "$wt" rev-parse --short HEAD)
+    # 'next' asks for 'open' again after a skip or a landing, so the line is
+    # recorded again then. A started pass keeps the line it was opened with.
+    if [ "$defined" = no ]; then
+      line="qa: opened — $branch at $short"
+      last=$(grep -E '^(qa: opened|qa: skipped|batch [0-9]+: landed)' "$ledger" | tail -n 1 || true)
+      if [ "$last" != "$line" ]; then
+        printf '%s\n' "$line" >> "$ledger"
+      fi
+    fi
+    echo "opened $short"
+    ;;
+esac
