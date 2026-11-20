@@ -32,6 +32,7 @@ assert_contains 'use building-phased-specs-in-parallel' "$(sed -n '3p' "$BUILD/S
 for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scripts/parse-deps \
          scripts/phase-state scripts/phase-schedule scripts/phase-overlap scripts/phase-worktree \
          scripts/phase-batch scripts/phase-land scripts/phase-push scripts/phase-pr scripts/phase-statusline \
+         scripts/phase-qa qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md qa-fix-prompt.md \
          scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
          overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
@@ -122,6 +123,39 @@ has 'run: undrained' 'a fixed failure lifts the drain on resume'
 has 'pull request: <url>' 'the report ends with the pull request'
 has 'significant decisions' 'the report lists significant decisions'
 has 'Known limits' 'states known limits'
+
+# --- the QA pass ---------------------------------------------------------------
+
+has '| `QA_SCOPE` |' 'the QA scope is an invocation value'
+has '`qa` in the request gives `top 5`' 'bare qa means the five most important flows'
+has '`no qa` gives `none`' 'a request can decline QA'
+has 'ask once, before preflight' 'a silent request is asked before preflight, never after'
+has 'run: qa scope — <QA_SCOPE>' 'records the scope in the ledger'
+has '## The QA pass' 'has a QA section'
+has 'phase-qa" "$DESIGN_DOC" "$BASE" next' 'asks phase-qa what to do next'
+has 'After every QA return' 'consults phase-qa after every QA return'
+has '| `skip <reason>` | append `qa: skipped — <reason>`' 'records a skip with its reason'
+has '| `walk F' 'walks the flows phase-qa lists'
+has 'keeping at most `CAP` walkers out' 'walkers respect the cap'
+has '| `fix G` |' 'fixes one group at a time'
+has '`BATCH_BRANCH` the QA branch' 'gates run on the QA branch in final mode'
+has 'RUN_DIR/qa-gates-evidence.md' 'the gates on QA fixes have their own evidence'
+has '| `close` | `phase-qa "$DESIGN_DOC" "$BASE" close`' 'the script writes the done line'
+has 'qa: flows defined — <n> found, selected <list>, not walkable <list>, parallel <p>' 'copies the planner lists into the ledger'
+has 'qa: triaged — <n> findings, fix <groups>, <s> spec, <o> outside this run' 'copies the triage groups into the ledger'
+has 'qa: not landed — <stderr>' 'a refused landing is recorded, not retried'
+has 'You never read a flows file, a findings file or the triage' 'the controller stays out of QA artifacts'
+has 'Every stage runs once' 'states the bound'
+has 'There is never a second fix round' 'no second fix round'
+has 'never makes the pull request a draft' 'QA does not change the draft rule'
+has 'phase-qa" "$DESIGN_DOC" "$BASE" report' 'the report takes its QA block from phase-qa'
+has 'qa-decisions.md' 'QA fix decisions are in the report'
+has 'A `qa: skipped` line counts only while' 'a skip is not final across resumes'
+has 'at most once per run directory' 'a started pass is never repeated'
+has 'A fix is only re-checked where it was found' 'known limit: narrow re-check'
+has 'reports them as not walked' 'known limit: tools'
+has 'one more fix round' 'rationalization: another round'
+has 'I read the code and it looks right' 'rationalization: reading is not walking'
 
 # --- the wrappers apply this skill's namespace and the worktree check ------------
 

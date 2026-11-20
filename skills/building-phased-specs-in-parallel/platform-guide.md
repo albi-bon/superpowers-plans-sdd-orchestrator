@@ -200,7 +200,8 @@ feat/x · 2/6 merged · 2 building · 1 queued · batch 3 verifying 2 · 1 repai
 Merged phases of those requested; phases building (scout, judge, lead);
 queued for the next batch; the open batch and what it is doing (merging,
 resolving, verifying, landing) with its phase count; repairing (failed in a
-batch, in or awaiting the ladder); held; failed; not started. It adds
+batch, in or awaiting the ladder); held; failed; not started. During the QA
+pass it adds the pass's stage, for example `qa walking 3/5`. It adds
 `draining` while the run drains, `idle <age>` when the ledger has not changed
 for 15 minutes, and `+N runs` when other runs are active. It reads only the
 ledger, through `phase-state`, and always exits 0.
