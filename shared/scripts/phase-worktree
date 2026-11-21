@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Manage the git worktrees a parallel run builds its phases in.
 #
-# Every phase gets branch phase-<N>-<slug> checked out at
-# <main checkout>/.worktrees/phase-<N>-<slug>/. The base branch has a worktree
-# of its own beside them, .worktrees/base (phase-preflight creates it). The
-# main checkout only hosts the .worktrees directory: this script never
-# switches it, reads it or needs it clean.
+# Every phase gets branch phase-<N>-<slug>@<run> checked out at
+# <main checkout>/.worktrees/<run>/phase-<N>-<slug>/, where <run> is the run
+# directory's name, so several runs can share one repository. The base branch
+# has a worktree of its own beside them, .worktrees/<run>/base
+# (phase-preflight creates it). A ledger from before runs were named keeps
+# the legacy names, phase-<N>-<slug> and .worktrees/phase-<N>-<slug>/;
+# phase-layout says which applies. The main checkout only hosts the
+# .worktrees directory: this script never switches it, reads it or needs it
+# clean.
 # .worktrees/ ignores itself with a '*' .gitignore, the same technique
 # phase-run-dir uses, so nothing under .git/ is edited by hand and no tracked
 # file changes.
@@ -19,7 +23,8 @@
 #              'phase N: released — phase M merged'. Refuses a branch that has
 #              commits of its own: only a phase that has not been built yet
 #              can be moved this way.
-#   check      refuse when any phase worktree is dirty. The base worktree is
+#   check      refuse when any of this run's phase worktrees is dirty;
+#              other runs' worktrees are theirs. The base worktree is
 #              phase-preflight's to check. The integration worktree is not
 #              checked: phase-batch discards what a verifier
 #              left there and aborts a merge of its own it did not record.
@@ -69,14 +74,17 @@ fi
 # The first entry of 'git worktree list' is always the main checkout, wherever
 # this is called from.
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-wtroot="$main/.worktrees"
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
+layout=$("$here/phase-layout" "$doc")
+wtroot=$(printf '%s\n' "$layout" | sed -n 's/^worktrees //p')
+suffix=$(printf '%s\n' "$layout" | sed -n 's/^branch-suffix //p')
 
+dir_of() { # the phase worktree's directory name, phase-<N>-<slug>
+  printf 'phase-%s-%s\n' "$1" "$("$here/parse-phases" "$doc" "$1" | cut -f3)"
+}
 branch_of() {
-  local record
-  record=$("$here/parse-phases" "$doc" "$1")
-  printf 'phase-%s-%s\n' "$1" "$(printf '%s\n' "$record" | cut -f3)"
+  printf '%s%s\n' "$(dir_of "$1")" "$suffix"
 }
 
 in_ledger() {
@@ -89,18 +97,18 @@ registered() { # registered PATH — is a worktree registered at PATH?
 
 case "$sub" in
   path)
-    printf '%s/%s\n' "$wtroot" "$(branch_of "$num")"
+    printf '%s/%s\n' "$wtroot" "$(dir_of "$num")"
     ;;
 
   start)
     branch=$(branch_of "$num")
-    path="$wtroot/$branch"
+    path="$wtroot/$(dir_of "$num")"
     if [ -f "$ledger" ] && grep -q "^phase $num: merged to base (" "$ledger"; then
       echo "phase $num is already recorded as merged; reconcile the ledger and git log" >&2
       exit 17
     fi
     mkdir -p "$wtroot"
-    printf '*\n' > "$wtroot/.gitignore"
+    printf '*\n' > "$main/.worktrees/.gitignore"
     if git show-ref --verify --quiet "refs/heads/$branch"; then
       if ! in_ledger "$num"; then
         echo "branch '$branch' exists and this run's ledger does not account for it." >&2
@@ -117,14 +125,14 @@ case "$sub" in
         exit 18
       fi
       git worktree add -q -b "$branch" "$path" "$base" >&2
-      printf 'phase %s: started — branch %s, worktree .worktrees/%s\n' "$num" "$branch" "$branch" >> "$ledger"
+      printf 'phase %s: started — branch %s, worktree %s\n' "$num" "$branch" "${path#"$main"/}" >> "$ledger"
     fi
     printf '%s\n' "$path"
     ;;
 
   refresh)
     branch=$(branch_of "$num")
-    path="$wtroot/$branch"
+    path="$wtroot/$(dir_of "$num")"
     if ! [ -d "$path" ]; then
       echo "no worktree for phase $num at $path: run start first" >&2
       exit 18
@@ -145,7 +153,7 @@ case "$sub" in
 
   remove)
     branch=$(branch_of "$num")
-    path="$wtroot/$branch"
+    path="$wtroot/$(dir_of "$num")"
     if [ -d "$path" ]; then
       git worktree remove "$path"
     else
@@ -160,6 +168,14 @@ case "$sub" in
     for path in "$wtroot"/phase-*; do
       [ -d "$path" ] || continue
       registered "$path" || continue
+      # Only a phase of this document that this ledger started is this run's.
+      # The legacy layout shares .worktrees/ with any other legacy run.
+      name=$(basename "$path")
+      n=${name#phase-}
+      n=${n%%-*}
+      case "$n" in '' | *[!0-9]*) continue ;; esac
+      in_ledger "$n" || continue
+      [ "$(dir_of "$n" 2>/dev/null || true)" = "$name" ] || continue
       [ -n "$(git -C "$path" status --porcelain)" ] || continue
       echo "worktree not clean: $path — an interrupted agent left changes; inspect them (git -C '$path' status)" >&2
       bad=1

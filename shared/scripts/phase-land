@@ -2,8 +2,10 @@
 # Land one verified integration batch on the base branch, in the base
 # worktree, record every phase it carries, and push base.
 #
-# Base is checked out in <main checkout>/.worktrees/base (phase-preflight puts
-# it there), and that is the only checkout this script moves. The main
+# Base is checked out in the run's base worktree,
+# <main checkout>/.worktrees/<run>/base, or .worktrees/base for a ledger from
+# before runs were named (phase-layout; phase-preflight puts it there), and
+# that is the only checkout this script moves. The main
 # checkout is the owner's: whatever branch it is on, clean or not, it is
 # neither read nor touched.
 #
@@ -51,8 +53,9 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   echo "not inside a git repository: cd to the repository the phases land in" >&2
   exit 2
 fi
-main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-basewt="$main/.worktrees/base"
+layout=$("$here/phase-layout" "$doc")
+basewt=$(printf '%s\n' "$layout" | sed -n 's/^base-worktree //p')
+suffix=$(printf '%s\n' "$layout" | sed -n 's/^branch-suffix //p')
 
 if [ "$(git -C "$basewt" branch --show-current 2>/dev/null || true)" != "$base" ]; then
   echo "base worktree $basewt is missing or not on base '$base': run phase-preflight again, it puts base there" >&2
@@ -63,7 +66,7 @@ if [ -n "$(git -C "$basewt" status --porcelain)" ]; then
   exit 11
 fi
 
-branch="phase-batch-$k"
+branch="phase-batch-$k$suffix"
 if ! git -C "$basewt" show-ref --verify --quiet "refs/heads/$branch"; then
   echo "batch branch '$branch' does not exist" >&2
   exit 18
@@ -121,7 +124,7 @@ printf '%s\n' "$landed" | while read -r num merged; do
     continue
   fi
   printf 'phase %s: merged to base (%s)\n' "$num" "$merged" >> "$ledger"
-  pbranch="phase-$num-$("$here/parse-phases" "$doc" "$num" | cut -f3)"
+  pbranch="phase-$num-$("$here/parse-phases" "$doc" "$num" | cut -f3)$suffix"
   # Metrics are a record, not a gate: a failure here never fails the landing.
   if metrics=$(cd "$basewt" && "$here/phase-metrics" "$merged" "$pbranch" 2>/dev/null); then
     printf 'phase %s: metrics — %s\n' "$num" "$metrics" >> "$ledger"

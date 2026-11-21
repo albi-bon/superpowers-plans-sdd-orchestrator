@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Print where one parallel run keeps its worktrees and what it names its
+# branches. Every script of building-phased-specs-in-parallel that touches a
+# worktree or a branch asks this script, so they can never disagree.
+#
+# A run's name is its run directory's name, the design document's basename
+# (phase-run-dir derives it the same way). Several runs can share one
+# repository because everything a run creates carries that name:
+#
+#   worktrees             <main>/.worktrees/<run>/
+#   base worktree         <main>/.worktrees/<run>/base
+#   integration worktree  <main>/.worktrees/<run>/integration
+#   phase worktree        <main>/.worktrees/<run>/phase-<N>-<slug>
+#   phase branch          phase-<N>-<slug>@<run>
+#   batch branch          phase-batch-<K>@<run>
+#   QA branch             phase-qa@<run>
+#
+# Branch names keep the 'phase-<N>-<slug>' head a repository's command guard
+# may match on, and end in '@<run>', which no other run can share.
+#
+# The layout is decided once, when phase-preflight creates the ledger: a new
+# ledger gets a '# layout: run-scoped' header line. A ledger without that line
+# was created before runs were named this way, and keeps the legacy layout
+# until it finishes: one set of names per repository, so only one such run
+# at a time.
+#
+#   worktrees             <main>/.worktrees/
+#   base worktree         <main>/.worktrees/base
+#   integration worktree  <main>/.worktrees/integration
+#   phase worktree        <main>/.worktrees/phase-<N>-<slug>
+#   phase branch          phase-<N>-<slug>
+#   batch branch          phase-batch-<K>
+#   QA branch             phase-qa-<run>
+#
+# With no ledger yet, the layout printed is the one a new run gets.
+#
+# The document need not exist where DESIGN_DOC names it: only its basename is
+# used, so phase-preflight can ask before the base worktree exists. The ledger
+# is looked up in the main checkout's run directory, as PHASE_RUN_ANCHOR=main
+# places it, under PHASE_RUN_NAMESPACE (default phase-orchestrator, as in
+# phase-run-dir).
+#
+# Prints one 'key value' line each, the value empty for 'branch-suffix' in
+# the legacy layout:
+#   layout run-scoped|legacy
+#   run <run>
+#   worktrees <dir>
+#   base-worktree <dir>
+#   integration-worktree <dir>
+#   branch-suffix <@run>
+#   qa-branch <branch>
+#
+# Exit codes:
+#   0   ok
+#   2   usage error, not inside a git repository, or a new run whose name
+#       cannot name its worktrees and branches
+#
+# Usage: phase-layout DESIGN_DOC
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: phase-layout DESIGN_DOC" >&2
+  exit 2
+fi
+run=$(basename "$1" .md)
+if ! main=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p') || [ -z "$main" ]; then
+  echo "not inside a git repository: cd to the repository the phases land in" >&2
+  exit 2
+fi
+ledger="$main/.superpowers/${PHASE_RUN_NAMESPACE:-phase-orchestrator}/$run/run.md"
+
+if [ -f "$ledger" ] && ! grep -qx '# layout: run-scoped' "$ledger"; then
+  printf 'layout legacy\n'
+  printf 'run %s\n' "$run"
+  printf 'worktrees %s\n' "$main/.worktrees"
+  printf 'base-worktree %s\n' "$main/.worktrees/base"
+  printf 'integration-worktree %s\n' "$main/.worktrees/integration"
+  printf 'branch-suffix \n'
+  printf 'qa-branch phase-qa-%s\n' "$run"
+  exit 0
+fi
+
+# 'base' and 'integration' are the legacy layout's own worktrees under
+# .worktrees/; a run named after either would nest inside a legacy run's.
+case "$run" in
+  '' | . | .. | base | integration)
+    echo "a run cannot be named '$run', the design document's basename: rename the document" >&2
+    exit 2
+    ;;
+esac
+if ! git check-ref-format --branch "phase-qa@$run" >/dev/null 2>&1; then
+  echo "the design document's basename '$run' cannot be part of a branch name: rename the document" >&2
+  exit 2
+fi
+printf 'layout run-scoped\n'
+printf 'run %s\n' "$run"
+printf 'worktrees %s\n' "$main/.worktrees/$run"
+printf 'base-worktree %s\n' "$main/.worktrees/$run/base"
+printf 'integration-worktree %s\n' "$main/.worktrees/$run/integration"
+printf 'branch-suffix @%s\n' "$run"
+printf 'qa-branch phase-qa@%s\n' "$run"

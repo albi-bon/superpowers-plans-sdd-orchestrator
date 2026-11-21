@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run the shared phase-layout under this skill's run-directory namespace, so the skills
+# in this repository never read or write each other's ledger. The namespace is
+# set here rather than by the controller, which could forget it after its
+# context is compacted. `pwd -P` resolves the installed skill symlink to this
+# checkout, where shared/ lives.
+# PHASE_RUN_ANCHOR=main keeps that run directory in the main checkout whichever
+# worktree the caller stands in: the controller works from the base worktree.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd -P)
+export PHASE_RUN_NAMESPACE=phase-parallel
+export PHASE_RUN_ANCHOR=main
+exec "$here/../../../shared/scripts/phase-layout" "$@"

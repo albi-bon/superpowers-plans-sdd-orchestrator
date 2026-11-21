@@ -25,7 +25,7 @@ rundir="$tmp/.superpowers/phase-parallel/spec"
 mkdir -p "$rundir"
 ledger="$rundir/run.md"
 pairs4="$rundir/phase-4-overlap.tsv"
-printf '# Phase run — spec: x\n# base: feat/x  requested: all\n\n' > "$ledger"
+printf '# Phase run — spec: x\n# base: feat/x  requested: all\n# layout: run-scoped\n\n' > "$ledger"
 brief() { # brief N FILES-LINE...
   local n=$1; shift
   { printf '# Phase %s\n\n## Tasks\n\n### - [ ] Task 1 — t\n' "$n"; for l in "$@"; do printf -- '- **Files:** %s\n' "$l"; done; } > "$rundir/phase-$n-brief.md"
@@ -57,12 +57,12 @@ src/__snapshots__/card.snap'
 
 # Phase 1 is in flight, planning src/a.ts, src/lib/, a schema catalogue and
 # every ignored path, with a commit touching src/c.ts.
-printf 'phase 1: started — branch phase-1-a\n' >> "$ledger"
+printf 'phase 1: started — branch phase-1-a@spec\n' >> "$ledger"
 ignored_line=$(printf '%s\n' "$IGNORED" | awk '{ printf "%s`%s` (modify)", (NR > 1 ? ", " : ""), $0 }')
 brief 1 '`src/a.ts` (create), `package-lock.json` (modify)' '`src/lib/` (create)' \
   '`src/schema/catalogue.ts` (modify)' "$ignored_line"
-git -C "$tmp" branch phase-1-a
-git -C "$tmp" switch -q phase-1-a
+git -C "$tmp" branch phase-1-a@spec
+git -C "$tmp" switch -q phase-1-a@spec
 mkdir -p "$tmp/src"; printf 'c\n' > "$tmp/src/c.ts"
 git -C "$tmp" add src/c.ts; git -C "$tmp" commit -qm c
 git -C "$tmp" switch -q feat/x
@@ -70,7 +70,7 @@ git -C "$tmp" switch -q feat/x
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 2
 assert_rc 2 'no brief: refused'
 
-printf 'phase 2: started — branch phase-2-b\n' >> "$ledger"
+printf 'phase 2: started — branch phase-2-b@spec\n' >> "$ledger"
 brief 2 '`src/b.ts` (create)' '`package-lock.json` (modify), `./README.md` (modify)'
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 2
 assert_rc 0 'disjoint: exits 0'
@@ -83,7 +83,7 @@ assert_contains 'phase 2: held — waits on phase 1 (prereq-inflight)' "$(cat "$
 
 # --- a file overlap is a signal for the judge, never a hold ------------------
 
-printf 'phase 3: started — branch phase-3-c\n' >> "$ledger"
+printf 'phase 3: started — branch phase-3-c@spec\n' >> "$ledger"
 brief 3 'src/x.ts, src/a.ts'
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 3
 assert_rc 0 'overlap: exits 0'
@@ -92,7 +92,7 @@ assert_eq '1' "$(holds)" 'overlap: appends nothing, the judge decides'
 assert_eq "$(printf '1\tsrc/a.ts')" "$(cat "$rundir/phase-3-overlap.tsv" 2>/dev/null)" \
   'overlap: the pairs file lists phase and path for the judge'
 
-printf 'phase 4: started — branch phase-4-d\n' >> "$ledger"
+printf 'phase 4: started — branch phase-4-d@spec\n' >> "$ledger"
 brief 4 '`src/c.ts` (modify)'
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 4
 assert_eq 'overlap 1 src/c.ts' "$OUT" 'brief vs the in-flight branch diff: overlap'
@@ -135,20 +135,20 @@ rm "$tmp/.phase-overlap-ignore"
 
 # Base has a worktree of its own: the repository ignore file is read from
 # base's copy and from the main checkout, wherever the script is called from.
-mkdir -p "$tmp/.worktrees"
+mkdir -p "$tmp/.worktrees/spec"
 printf '*\n' > "$tmp/.worktrees/.gitignore"
-git -C "$tmp" worktree add -q --detach "$tmp/.worktrees/base"
-printf 'src/schema/catalogue.ts\n' > "$tmp/.worktrees/base/.phase-overlap-ignore"
+git -C "$tmp" worktree add -q --detach "$tmp/.worktrees/spec/base"
+printf 'src/schema/catalogue.ts\n' > "$tmp/.worktrees/spec/base/.phase-overlap-ignore"
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 4
 assert_eq 'clear' "$OUT" 'the ignore file on base is read from the main checkout'
-rm "$tmp/.worktrees/base/.phase-overlap-ignore"
+rm "$tmp/.worktrees/spec/base/.phase-overlap-ignore"
 printf 'src/schema/catalogue.ts\n' > "$tmp/.phase-overlap-ignore"
 set +e
-OUT=$(cd "$tmp/.worktrees/base" && PHASE_RUN_ANCHOR=main "$OVERLAP" "$tmp/spec.md" feat/x 4 2>&1)
+OUT=$(cd "$tmp/.worktrees/spec/base" && PHASE_RUN_ANCHOR=main "$OVERLAP" "$tmp/spec.md" feat/x 4 2>&1)
 set -e
 assert_eq 'clear' "$OUT" 'the ignore file in the main checkout is read from the base worktree'
 rm "$tmp/.phase-overlap-ignore"
-git -C "$tmp" worktree remove --force "$tmp/.worktrees/base"
+git -C "$tmp" worktree remove --force "$tmp/.worktrees/spec/base"
 
 printf 'catalogue.ts\n' > "$rundir/overlap-ignore"
 run_in "$OVERLAP" "$tmp/spec.md" feat/x 4

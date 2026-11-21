@@ -11,11 +11,16 @@
 # effects.
 #
 # PHASE_BASE_CHECKOUT=worktree (building-phased-specs-in-parallel sets it)
-# keeps the base branch in a worktree of its own instead,
-# <main checkout>/.worktrees/base, and leaves the main checkout to its owner:
-# it is never switched and never has to be clean. In that mode:
-#   - the base worktree is created, or re-attached, or moved to BASE when an
-#     earlier run left it on another base; it must be clean (exit 11);
+# keeps the base branch in a worktree of its own instead, and leaves the main
+# checkout to its owner: it is never switched and never has to be clean. The
+# run's worktrees and branches carry its name, so several runs can share one
+# repository; phase-layout says where they are. In that mode:
+#   - a new ledger records '# layout: run-scoped', and the base worktree is
+#     <main checkout>/.worktrees/<run>/base. A ledger without that line keeps
+#     the legacy <main checkout>/.worktrees/base;
+#   - the base worktree is created, or re-attached; it must be clean (exit 11)
+#     and on BASE. One on another branch, or detached, is refused (exit 13)
+#     and never switched: another run may be working in it;
 #   - BASE checked out anywhere else is refused (exit 13): the script will not
 #     switch a checkout it does not own;
 #   - the run reads the design document from base, so the main checkout can
@@ -23,20 +28,23 @@
 #     the repository; a copy that is not committed on base, or on a fresh run
 #     differs from base's, is refused (exit 26). A git-ignored document, or
 #     one outside the repository, is read where it is;
-#   - two more lines are printed, for the controller to keep:
+#   - three more lines are printed, for the controller to keep:
 #       base-worktree <absolute path>
+#       integration-worktree <absolute path>
 #       design-doc <absolute path of the document to use from here on>
 #
 # Exit codes:
 #   0   ok
 #   2   usage error, unreadable design document, or malformed range
+#       (worktree mode: or a document whose basename cannot name a run)
 #   3   the design document contains no phase headings
 #   4   a requested phase number is absent from the document
 #   10  not inside a git repository
 #   11  working tree not clean (worktree mode: the base worktree)
 #   12  the base branch is main or master
 #   13  the base branch could not be resolved or created (worktree mode: or
-#       it is checked out outside the base worktree)
+#       it is checked out outside the base worktree, or the base worktree
+#       is on another branch)
 #   14  a phase branch exists that this run's ledger does not account for
 #   15  the run ledger belongs to another spec or base
 #   26  worktree mode: the design document is not committed on base, or
@@ -104,7 +112,12 @@ fresh_check=""
 if [ "$mode" = worktree ]; then
   # The first entry of 'git worktree list' is always the main checkout.
   main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-  basewt="$main/.worktrees/base"
+  # The run's name is the document's basename wherever it is named, so the
+  # layout can be asked before the document is found on base.
+  layout=$("$here/phase-layout" "$doc") || exit 2
+  basewt=$(printf '%s\n' "$layout" | sed -n 's/^base-worktree //p')
+  intwt=$(printf '%s\n' "$layout" | sed -n 's/^integration-worktree //p')
+  suffix=$(printf '%s\n' "$layout" | sed -n 's/^branch-suffix //p')
 
   # Base is created off trunk when it does not exist yet, so trunk's copy of
   # the document is the one a new base starts with.
@@ -131,7 +144,14 @@ if [ "$mode" = worktree ]; then
   if [ -n "$held" ] && [ "$held" != "$basewt" ] && [ -d "$held" ]; then
     echo "base '$base' is checked out in $held." >&2
     echo "this run keeps '$base' in a worktree of its own, $basewt, and switches no other checkout." >&2
-    echo "free the branch first: git -C '$held' switch <another-branch>   (or: git -C '$held' switch --detach)" >&2
+    case "$held" in
+      "$main/.worktrees/"*)
+        echo "another run builds on '$base' there: give this run a base branch of its own" >&2
+        ;;
+      *)
+        echo "free the branch first: git -C '$held' switch <another-branch>   (or: git -C '$held' switch --detach)" >&2
+        ;;
+    esac
     exit 13
   fi
 
@@ -180,7 +200,11 @@ commit your version on '$start' first (git add, git commit), or restore the comm
     parse_doc=$given
   fi
 
-  if registered "$basewt" && [ -d "$basewt" ] && [ -n "$(git -C "$basewt" status --porcelain)" ]; then
+  # A base worktree on another branch is refused further down, after the
+  # ledger checks, and is not this run's to clean.
+  if registered "$basewt" && [ -d "$basewt" ] \
+    && [ "$(git -C "$basewt" branch --show-current)" = "$base" ] \
+    && [ -n "$(git -C "$basewt" status --porcelain)" ]; then
     echo "base worktree not clean: $basewt — commit or discard what is there before starting a run (git -C '$basewt' status)" >&2
     exit 11
   fi
@@ -256,7 +280,7 @@ printf '%s\n' "$selected" > "$tmpsel"
 
 while IFS="$(printf '\t')" read -r num _ slug; do
   [ -n "$num" ] || continue
-  branch="phase-$num-$slug"
+  branch="phase-$num-$slug${suffix:-}"
   git show-ref --verify --quiet "refs/heads/$branch" || continue
 
   if [ -f "$ledger" ] \
@@ -272,23 +296,23 @@ while IFS="$(printf '\t')" read -r num _ slug; do
 done < "$tmpsel"
 
 if [ "$mode" = worktree ]; then
-  # Every refusal is behind us: put base in its worktree. Only this worktree
-  # is ever created or switched; it is the run's own.
+  # Never switch a base worktree that exists: on another branch it is another
+  # run's, or this run's on a base the ledger does not know.
   if registered "$basewt" && [ -d "$basewt" ]; then
-    if [ "$(git -C "$basewt" branch --show-current)" != "$base" ]; then
-      if [ "$start" = "$base" ]; then
-        set -- switch -q "$base"
-      else
-        set -- switch -q -c "$base" "$start"
-      fi
-      if ! git -C "$basewt" "$@" >/dev/null 2>&1; then
-        echo "could not put the base worktree $basewt on '$base' (git -C '$basewt' $*)" >&2
-        exit 13
-      fi
+    current=$(git -C "$basewt" branch --show-current)
+    if [ "$current" != "$base" ]; then
+      if [ -n "$current" ]; then on="'$current'"; else on='a detached HEAD'; fi
+      echo "the base worktree $basewt is on $on, not '$base'." >&2
+      echo "this run does not switch it: a run may be working there. If none is, remove it first (git worktree remove '$basewt')" >&2
+      exit 13
     fi
-  else
+  fi
+
+  # Every refusal is behind us: put base in its worktree, unless it is there
+  # already. Only this worktree is ever created; none is ever switched.
+  if ! { registered "$basewt" && [ -d "$basewt" ]; }; then
     git worktree prune
-    mkdir -p "$main/.worktrees"
+    mkdir -p "$main/.worktrees" "$(dirname "$basewt")"
     printf '*\n' > "$main/.worktrees/.gitignore"
     if [ "$start" = "$base" ]; then
       set -- worktree add -q "$basewt" "$base"
@@ -325,14 +349,22 @@ else
 fi
 
 # Initialize once, after every refusal check, without overwriting resume state.
+# In worktree mode a new ledger fixes the run-scoped layout for the rest of
+# the run; phase-layout reads it.
 if [ ! -f "$ledger" ]; then
-  printf '# Phase run — spec: %s\n# base: %s  requested: %s\n\n' \
-    "$docpath" "$base" "$range" > "$ledger"
+  {
+    printf '# Phase run — spec: %s\n# base: %s  requested: %s\n' "$docpath" "$base" "$range"
+    if [ "$mode" = worktree ]; then
+      printf '# layout: run-scoped\n'
+    fi
+    printf '\n'
+  } > "$ledger"
 fi
 
 numbers=$(printf '%s\n' "$selected" | cut -f1 | tr '\n' ',' | sed 's/,$//')
 echo "preflight ok: base $base, phases $numbers, run-dir $rundir"
 if [ "$mode" = worktree ]; then
   echo "base-worktree $basewt"
+  echo "integration-worktree $intwt"
   echo "design-doc $docpath"
 fi

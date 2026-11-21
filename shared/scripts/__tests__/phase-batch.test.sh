@@ -23,7 +23,7 @@ trap 'rm -rf "$tmp"' EXIT
 repo="$tmp/repo"
 # Base lives in its own worktree, where the controller works and batches land.
 # The main checkout stays on the owner's branch, with work in progress in it.
-bwt="$repo/.worktrees/base"
+bwt="$repo/.worktrees/spec/base"
 spec="$bwt/spec.md"
 origin="$tmp/origin.git"
 run_in() {
@@ -44,7 +44,7 @@ printf 'shared\n' > "$repo/shared.txt"
 git -C "$repo" add spec.md shared.txt
 git -C "$repo" commit -qm initial
 git -C "$repo" branch feat/x
-mkdir -p "$repo/.worktrees"
+mkdir -p "$repo/.worktrees/spec"
 printf '*\n' > "$repo/.worktrees/.gitignore"
 git -C "$repo" worktree add -q "$bwt" feat/x
 printf 'work in progress\n' > "$repo/wip.txt"
@@ -52,12 +52,12 @@ main_head=$(git -C "$repo" rev-parse HEAD)
 rundir="$repo/.superpowers/phase-parallel/spec"
 mkdir -p "$rundir"
 ledger="$rundir/run.md"
-printf '# Phase run — spec: x\n# base: feat/x  requested: 1-5\n\n' > "$ledger"
+printf '# Phase run — spec: x\n# base: feat/x  requested: 1-5\n# layout: run-scoped\n\n' > "$ledger"
 log() { printf '%s\n' "$@" >> "$ledger"; }
 commit_in() { # commit_in DIR FILE CONTENT
   printf '%s\n' "$3" > "$1/$2"; git -C "$1" add "$2"; git -C "$1" commit -qm "$2"
 }
-iwt="$repo/.worktrees/integration"
+iwt="$repo/.worktrees/spec/integration"
 
 for n in 1 2 3 4; do run_in "$WT" "$spec" feat/x start "$n"; eval "wt$n=\$OUT"; done
 # shellcheck disable=SC2154 # wt1..wt4 are set by the eval above
@@ -76,14 +76,14 @@ v4=$(git -C "$wt4" rev-parse --short HEAD)
 
 run_in "$PUSH" "$spec" feat/x 1
 assert_rc 0 'push 1: exits 0'
-assert_eq "push: phase-1-one at $v1" "$OUT" 'push 1: prints what it pushed'
-assert_eq "$(git -C "$repo" rev-parse "$v1")" "$(git -C "$origin" rev-parse refs/heads/phase-1-one)" 'push 1: origin holds the phase branch'
-assert_contains "push: phase-1-one at $v1" "$(cat "$ledger")" 'push 1: recorded'
+assert_eq "push: phase-1-one@spec at $v1" "$OUT" 'push 1: prints what it pushed'
+assert_eq "$(git -C "$repo" rev-parse "$v1")" "$(git -C "$origin" rev-parse refs/heads/phase-1-one@spec)" 'push 1: origin holds the phase branch'
+assert_contains "push: phase-1-one@spec at $v1" "$(cat "$ledger")" 'push 1: recorded'
 git -C "$repo" remote rename origin away
 run_in "$PUSH" "$spec" feat/x 2
 assert_rc 0 'push without origin: still exits 0, a push is a backup'
-assert_contains 'push: phase-2-two failed — ' "$OUT" 'push without origin: the failure is printed'
-assert_contains 'push: phase-2-two failed — ' "$(cat "$ledger")" 'push without origin: the failure is recorded'
+assert_contains 'push: phase-2-two@spec failed — ' "$OUT" 'push without origin: the failure is printed'
+assert_contains 'push: phase-2-two@spec failed — ' "$(cat "$ledger")" 'push without origin: the failure is recorded'
 git -C "$repo" remote rename away origin
 run_in "$PUSH" "$spec" feat/x 5
 assert_rc 18 'push of a phase with no branch: refused'
@@ -107,7 +107,7 @@ run_in "$BATCH" "$spec" feat/x open "1@$v1" "2@$v2" "3@$v3"
 assert_rc 0 'open: exits 0 on a conflict'
 assert_eq 'conflict 1 3 1,2' "$OUT" 'open: phase 3 conflicts with the phases merged before it'
 assert_contains "batch 1: opened — phases 1@$v1 2@$v2 3@$v3" "$(cat "$ledger")" 'open: recorded with each phase sha'
-assert_eq 'phase-batch-1' "$(git -C "$iwt" branch --show-current)" 'open: the integration worktree is on the batch branch'
+assert_eq 'phase-batch-1@spec' "$(git -C "$iwt" branch --show-current)" 'open: the integration worktree is on the batch branch'
 assert_eq 'main' "$(git -C "$repo" branch --show-current)" 'open: the main checkout stays on the owner'"'"'s branch'
 assert_contains 'phase 1: batched — batch 1, clean merge' "$(cat "$ledger")" 'phase 1 merged cleanly'
 assert_contains 'phase 3: batched — batch 1, conflict in 1 files' "$(cat "$ledger")" 'phase 3 conflict recorded'
@@ -188,7 +188,7 @@ commit_in "$wt5" five.txt five
 v5=$(git -C "$wt5" rev-parse --short HEAD)
 run_in "$BATCH" "$spec" feat/x open "4@$v4" "5@$v5"
 assert_eq 'conflict 2 4 1,2,3' "$OUT" 'open 2: phase 4 forked before batch 1 landed, so the landed phases are the other side'
-assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-batch-1 && echo yes || echo no)" \
+assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-batch-1@spec && echo yes || echo no)" \
   'open 2: the landed batch branch is deleted'
 git -C "$iwt" merge --abort
 log 'phase 4: unresolved — both sides rewrite shared.txt'
@@ -236,7 +236,7 @@ run_in "$BATCH" "$spec" feat/x open "4@$r4"
 b4=$(git -C "$iwt" rev-parse --short HEAD)
 assert_eq "built 4 $b4" "$OUT" 'open: tracked changes a verifier left in the integration worktree are discarded'
 log "batch 4: verified PASS — full suites all — $b4"
-git -C "$bwt" merge -q --ff-only phase-batch-4
+git -C "$bwt" merge -q --ff-only phase-batch-4@spec
 run_in "$LAND" "$spec" feat/x 4 "$b4"
 assert_rc 0 'land after an interrupted fast-forward: exits 0'
 assert_eq '1' "$(grep -c '^phase 4: merged to base' "$ledger")" 'land re-run: the phase is recorded as merged'

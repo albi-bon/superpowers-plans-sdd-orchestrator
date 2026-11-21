@@ -3,11 +3,15 @@
 # the batch merged onto it, one after another, so the integration verifier
 # checks the combined tree once instead of one phase at a time.
 #
-# Batches are built in one integration worktree, <main>/.worktrees/integration,
-# reused by every batch of the run so its installed dependencies carry over.
-# Batch K lives on branch phase-batch-<K>. Each phase is merged by its queued
-# sha with 'merge: phase <N> — <title>', the subject base's own history uses,
-# so a landed batch reads on base exactly like phases landed one by one.
+# Batches are built in one integration worktree,
+# <main>/.worktrees/<run>/integration, reused by every batch of the run so its
+# installed dependencies carry over. Batch K lives on branch
+# phase-batch-<K>@<run>. <run> is the run directory's name, so two runs in one
+# repository never share either; a ledger from before runs were named keeps
+# .worktrees/integration and phase-batch-<K> (phase-layout).
+# Each phase is merged by its queued sha with 'merge: phase <N> — <title>',
+# the subject base's own history uses, so a landed batch reads on base exactly
+# like phases landed one by one.
 # Base moves only through phase-land, and only one batch is open at a time,
 # so base cannot move under a batch while it is built or verified.
 #
@@ -74,12 +78,17 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   exit 2
 fi
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-wt="$main/.worktrees/integration"
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
+layout=$("$here/phase-layout" "$doc")
+wt=$(printf '%s\n' "$layout" | sed -n 's/^integration-worktree //p')
+suffix=$(printf '%s\n' "$layout" | sed -n 's/^branch-suffix //p')
 
 branch_of() {
-  printf 'phase-%s-%s\n' "$1" "$("$here/parse-phases" "$doc" "$1" | cut -f3)"
+  printf 'phase-%s-%s%s\n' "$1" "$("$here/parse-phases" "$doc" "$1" | cut -f3)" "$suffix"
+}
+batch_branch() {
+  printf 'phase-batch-%s%s\n' "$1" "$suffix"
 }
 title_of() {
   "$here/parse-phases" "$doc" "$1" | cut -f2
@@ -94,7 +103,7 @@ registered() {
 ensure_worktree() {
   if ! { registered "$wt" && [ -d "$wt" ]; }; then
     git worktree prune
-    mkdir -p "$main/.worktrees"
+    mkdir -p "$main/.worktrees" "$(dirname "$wt")"
     printf '*\n' > "$main/.worktrees/.gitignore"
     git worktree add -q --detach "$wt" "$base" >&2
   fi
@@ -147,9 +156,10 @@ case "$sub" in
       list="$list $num@$(git rev-parse --short "$want")"
     done
     k=$(( $(grep -c '^batch [0-9][0-9]*: opened' "$ledger" || true) + 1 ))
-    if git show-ref --verify --quiet "refs/heads/phase-batch-$k"; then
-      echo "branch 'phase-batch-$k' exists and this run's ledger does not account for it." >&2
-      echo "delete it (git branch -D phase-batch-$k) or resume the run that created it" >&2
+    bbranch=$(batch_branch "$k")
+    if git show-ref --verify --quiet "refs/heads/$bbranch"; then
+      echo "branch '$bbranch' exists and this run's ledger does not account for it." >&2
+      echo "delete it (git branch -D $bbranch) or resume the run that created it" >&2
       exit 14
     fi
     ensure_worktree
@@ -190,16 +200,17 @@ if git -C "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null; then
   git -C "$wt" merge --abort
 fi
 reset_tracked
-if [ "$(git -C "$wt" branch --show-current)" != "phase-batch-$k" ]; then
-  if git show-ref --verify --quiet "refs/heads/phase-batch-$k"; then
-    git -C "$wt" switch -q "phase-batch-$k"
+bbranch=$(batch_branch "$k")
+if [ "$(git -C "$wt" branch --show-current)" != "$bbranch" ]; then
+  if git show-ref --verify --quiet "refs/heads/$bbranch"; then
+    git -C "$wt" switch -q "$bbranch"
   else
-    git -C "$wt" switch -q -c "phase-batch-$k" "$base"
+    git -C "$wt" switch -q -c "$bbranch" "$base"
   fi
 fi
 # Branches of landed batches are fully on base by now.
 for landed in $("$here/phase-state" "$doc" | awk -F'\t' '$1 == "batch" && $3 == "landed" { print $2 }'); do
-  git branch -q -d "phase-batch-$landed" >/dev/null 2>&1 || true
+  git branch -q -d "$(batch_branch "$landed")" >/dev/null 2>&1 || true
 done
 
 left() { # did phase $1 leave batch k? (the resolver could not merge it)
@@ -251,7 +262,7 @@ for pair in $members; do
   fcount=$(printf '%s\n' "$files" | grep -c . || true)
   {
     printf '# Phase %s — conflicts merging it into batch %s\n\n' "$num" "$k"
-    printf 'Merging phase %s (%s) into phase-batch-%s stopped on conflicts. The merge is in\nprogress in %s.\n' "$num" "$sha" "$k" "$wt"
+    printf 'Merging phase %s (%s) into %s stopped on conflicts. The merge is in\nprogress in %s.\n' "$num" "$sha" "$bbranch" "$wt"
     printf 'The batch side ("ours") is %s plus the phases merged into the batch before this one.\n\n' "$base"
     printf '## Phases on the other side\n\n'
     if [ -n "$others" ]; then

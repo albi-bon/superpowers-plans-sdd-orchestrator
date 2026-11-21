@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Push one branch of a parallel run to origin, and record the outcome.
 #
-# 'phase-push … N' pushes phase N's branch: a backup of a phase whose lead
+# 'phase-push … N' pushes phase N's branch (named as phase-layout says): a backup of a phase whose lead
 # finished, or of a repaired phase, taken before it waits for a batch.
 # 'phase-push … base' pushes the base branch; phase-land calls it after every
 # landed batch, and phase-pr before opening the pull request.
@@ -40,7 +40,10 @@ fi
 case "$what" in
   base) branch=$base ;;
   '' | *[!0-9]*) echo "usage: phase-push DESIGN_DOC BASE N|base" >&2; exit 2 ;;
-  *) branch="phase-$what-$("$here/parse-phases" "$doc" "$what" | cut -f3)" ;;
+  *)
+    suffix=$("$here/phase-layout" "$doc" | sed -n 's/^branch-suffix //p')
+    branch="phase-$what-$("$here/parse-phases" "$doc" "$what" | cut -f3)$suffix"
+    ;;
 esac
 if ! git show-ref --verify --quiet "refs/heads/$branch"; then
   echo "branch '$branch' does not exist" >&2

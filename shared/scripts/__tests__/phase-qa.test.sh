@@ -16,7 +16,7 @@ trap 'rm -rf "$tmp"' EXIT
 repo="$tmp/repo"
 # Base lives in its own worktree, where the controller works and QA fixes
 # land. The main checkout stays on the owner's branch, with work in progress.
-bwt="$repo/.worktrees/base"
+bwt="$repo/.worktrees/spec/base"
 spec="$bwt/spec.md"
 origin="$tmp/origin.git"
 run_in() {
@@ -37,18 +37,18 @@ printf 'shared\n' > "$repo/shared.txt"
 git -C "$repo" add spec.md shared.txt
 git -C "$repo" commit -qm initial
 git -C "$repo" branch feat/x
-mkdir -p "$repo/.worktrees"
+mkdir -p "$repo/.worktrees/spec"
 printf '*\n' > "$repo/.worktrees/.gitignore"
 git -C "$repo" worktree add -q "$bwt" feat/x
 printf 'work in progress\n' > "$repo/wip.txt"
 main_head=$(git -C "$repo" rev-parse HEAD)
 rundir="$repo/.superpowers/phase-parallel/spec"
 ledger="$rundir/run.md"
-iwt="$repo/.worktrees/integration"
+iwt="$repo/.worktrees/spec/integration"
 log() { printf '%s\n' "$@" >> "$ledger"; }
 reset_ledger() { # start the ledger again, then append the lines given
   mkdir -p "$rundir"
-  printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\n' "$spec" > "$ledger"
+  printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n# layout: run-scoped\n\n' "$spec" > "$ledger"
   [ "$#" -eq 0 ] || log "$@"
 }
 qa() { run_in "$QA" "$spec" feat/x "$@"; }
@@ -64,8 +64,8 @@ b=$(tip feat/x)
 qa open
 assert_rc 0 'open: exits 0'
 assert_eq "opened $b" "$OUT" 'open: prints the base tip'
-assert_eq 'phase-qa-spec' "$(git -C "$iwt" branch --show-current)" 'open: the integration worktree is on the QA branch, named after the run'
-assert_contains "qa: opened — phase-qa-spec at $b" "$(cat "$ledger")" 'open: recorded'
+assert_eq 'phase-qa@spec' "$(git -C "$iwt" branch --show-current)" 'open: the integration worktree is on the QA branch, named after the run'
+assert_contains "qa: opened — phase-qa@spec at $b" "$(cat "$ledger")" 'open: recorded'
 
 printf 'left by a walker\n' >> "$iwt/shared.txt"
 qa open
@@ -79,20 +79,20 @@ assert_eq '2' "$(grep -c '^qa: opened' "$ledger")" 'open after a skip: recorded 
 commit_in "$bwt" two.txt two
 b2=$(tip feat/x)
 qa open
-assert_eq "$(git -C "$repo" rev-parse feat/x)" "$(git -C "$repo" rev-parse phase-qa-spec)" 'open: an unused QA branch follows base'
-assert_contains "qa: opened — phase-qa-spec at $b2" "$(cat "$ledger")" 'open: the new tip is recorded'
+assert_eq "$(git -C "$repo" rev-parse feat/x)" "$(git -C "$repo" rev-parse phase-qa@spec)" 'open: an unused QA branch follows base'
+assert_contains "qa: opened — phase-qa@spec at $b2" "$(cat "$ledger")" 'open: the new tip is recorded'
 
 log 'qa: flows defined — 1 found, selected 1, not walkable -, parallel yes'
 commit_in "$iwt" fix.txt fix
-f=$(tip phase-qa-spec)
+f=$(tip phase-qa@spec)
 qa open
-assert_eq "$f" "$(tip phase-qa-spec)" 'open: once flows are defined the branch is never moved'
+assert_eq "$f" "$(tip phase-qa@spec)" 'open: once flows are defined the branch is never moved'
 
 reset_ledger 'run: invoked — cap 3'
 qa open
 assert_rc 14 'open: refuses a QA branch the ledger does not account for'
 git -C "$iwt" switch -q --detach feat/x
-git -C "$repo" branch -q -D phase-qa-spec
+git -C "$repo" branch -q -D phase-qa@spec
 log 'batch 1: opened — phases 1@abc1234'
 qa open
 assert_rc 17 'open: refuses while a batch is open'
@@ -118,7 +118,7 @@ log 'qa: skipped — the final check failed'
 nx 'done' 'a skip that still counts ends the pass'
 log 'run: final check PASS aaa1'
 nx 'open' 'a later final check supersedes the skip'
-log 'qa: opened — phase-qa-spec at aaa1'
+log 'qa: opened — phase-qa@spec at aaa1'
 nx 'plan' 'opened'
 st 'planning' 'opened'
 log 'qa: planner dispatched'
@@ -170,7 +170,7 @@ assert_rc 17 'close: refuses a second done line'
 
 pass_ledger() { # pass_ledger <flows-defined tail> [more lines…]
   reset_ledger 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' \
-    'batch 1: landed (aaa1)' 'qa: opened — phase-qa-spec at aaa1' "qa: flows defined — $1"
+    'batch 1: landed (aaa1)' 'qa: opened — phase-qa@spec at aaa1' "qa: flows defined — $1"
   shift
   [ "$#" -eq 0 ] || log "$@"
 }
@@ -196,7 +196,7 @@ pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: walk
   'qa: triaged — 2 findings, fix G1@1 G2@1, 0 spec, 0 outside this run' 'qa group 1: fixed 1111111' 'qa group 2: fixed 2222222' \
   'qa: verified FAIL — unit suite'
 nx 'push' 'failed gates: back up the branch'
-log 'push: phase-qa-spec failed — no route to host'
+log 'push: phase-qa@spec failed — no route to host'
 closes 'qa: done — 0 confirmed, 0 still broken, 0 not fixed, 0 new, 0 spec, 2 fixed but not landed' 'failed gates: no re-check, no second round'
 pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: walked — 1 findings' \
   'qa: triaged — 1 findings, fix G1@1, 0 spec, 0 outside this run' 'qa group 1: fixed 1111111' \
@@ -205,10 +205,10 @@ nx 'push' 'a refused landing is backed up, not retried'
 pass_ledger '1 found, selected 1, not walkable -, parallel yes' 'qa flow 1: walked — 1 findings' 'batch 2: landed (bbb2)'
 closes 'qa: done — abandoned, base moved under the pass' 'base moved under a started pass'
 reset_ledger 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' \
-  'batch 1: landed (aaa1)' 'qa: opened — phase-qa-spec at aaa1' 'batch 2: landed (bbb2)'
+  'batch 1: landed (aaa1)' 'qa: opened — phase-qa@spec at aaa1' 'batch 2: landed (bbb2)'
 nx 'open' 'base moved before the plan: open again'
 reset_ledger 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' \
-  'batch 1: landed (aaa1)' 'qa: opened — phase-qa-spec at aaa1' 'qa: skipped — the product could not be started'
+  'batch 1: landed (aaa1)' 'qa: opened — phase-qa@spec at aaa1' 'qa: skipped — the product could not be started'
 nx 'done' 'a planner skip ends the pass'
 log 'run: qa scope — top 3'
 nx 'open' 'the owner asking again supersedes the skip, and the pass starts over from open'
@@ -218,7 +218,7 @@ nx 'open' 'the owner asking again supersedes the skip, and the pass starts over 
 reset_ledger 'run: qa scope — all'
 qa open
 commit_in "$iwt" fix.txt fix
-f=$(tip phase-qa-spec)
+f=$(tip phase-qa@spec)
 qa land "$f"
 assert_rc 22 'land: refuses a commit the ledger does not show as verified'
 log 'qa: verified FAIL — unit suite'
@@ -239,7 +239,7 @@ assert_contains "qa: landed ($f)" "$(cat "$ledger")" 'land: recorded'
 assert_contains "push: feat/x at $f" "$(cat "$ledger")" 'land: base is pushed'
 assert_eq '' "$(git -C "$iwt" branch --show-current)" 'land: the integration worktree is detached'
 assert_eq "$f" "$(git -C "$iwt" rev-parse --short HEAD)" 'land: the integration worktree is on the base tip'
-assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: the QA branch is deleted'
+assert_eq 'no' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa@spec && echo yes || echo no)" 'land: the QA branch is deleted'
 assert_eq "$f" "$(git -C "$bwt" rev-parse --short HEAD)" 'land: the base worktree is at the verified commit'
 assert_eq "$main_head" "$(git -C "$repo" rev-parse HEAD)" 'land: the main checkout is not moved'
 assert_eq 'main' "$(git -C "$repo" branch --show-current)" 'land: the main checkout stays on the branch of its owner'
@@ -251,9 +251,9 @@ assert_rc 17 'land: refuses a second landing'
 reset_ledger 'run: qa scope — all'
 qa open
 commit_in "$iwt" fix2.txt fix2
-f2=$(tip phase-qa-spec)
+f2=$(tip phase-qa@spec)
 log "qa: verified PASS — $f2"
-git -C "$bwt" merge -q --ff-only phase-qa-spec
+git -C "$bwt" merge -q --ff-only phase-qa@spec
 qa land "$f2"
 assert_rc 0 'land: a re-run after an interruption finishes the landing'
 assert_contains "qa: landed ($f2)" "$(cat "$ledger")" 'land: the re-run records it'
@@ -263,20 +263,20 @@ assert_contains "qa: landed ($f2)" "$(cat "$ledger")" 'land: the re-run records 
 reset_ledger 'run: qa scope — all'
 qa push
 assert_rc 0 'push: a missing QA branch is recorded, not fatal'
-assert_eq 'push: phase-qa-spec failed — the branch does not exist' "$OUT" 'push: says the branch is missing'
-assert_contains 'push: phase-qa-spec failed — the branch does not exist' "$(cat "$ledger")" 'push: the missing branch is in the ledger, so next moves on'
+assert_eq 'push: phase-qa@spec failed — the branch does not exist' "$OUT" 'push: says the branch is missing'
+assert_contains 'push: phase-qa@spec failed — the branch does not exist' "$(cat "$ledger")" 'push: the missing branch is in the ledger, so next moves on'
 qa open
 commit_in "$iwt" fix3.txt fix3
-f3=$(tip phase-qa-spec)
+f3=$(tip phase-qa@spec)
 qa push
 assert_rc 0 'push: exits 0'
-assert_eq "push: phase-qa-spec at $f3" "$OUT" 'push: prints what it pushed'
-assert_eq "$(git -C "$repo" rev-parse phase-qa-spec)" "$(git -C "$origin" rev-parse refs/heads/phase-qa-spec)" 'push: origin holds the QA branch'
-assert_contains "push: phase-qa-spec at $f3" "$(cat "$ledger")" 'push: recorded'
+assert_eq "push: phase-qa@spec at $f3" "$OUT" 'push: prints what it pushed'
+assert_eq "$(git -C "$repo" rev-parse phase-qa@spec)" "$(git -C "$origin" rev-parse refs/heads/phase-qa@spec)" 'push: origin holds the QA branch'
+assert_contains "push: phase-qa@spec at $f3" "$(cat "$ledger")" 'push: recorded'
 git -C "$repo" remote rename origin away
 qa push
 assert_rc 0 'push: a failed push still exits 0'
-assert_contains 'push: phase-qa-spec failed — ' "$OUT" 'push: the failure is recorded'
+assert_contains 'push: phase-qa@spec failed — ' "$OUT" 'push: the failure is recorded'
 git -C "$repo" remote rename away origin
 
 # --- land: the main checkout is elsewhere, or base moved ----------------------------
@@ -289,7 +289,7 @@ git -C "$bwt" switch -q feat/x
 commit_in "$bwt" moved.txt moved
 qa land "$f3"
 assert_rc 21 'land: refuses when base moved past what the QA branch was built on'
-assert_eq 'yes' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa-spec && echo yes || echo no)" 'land: a refusal keeps the QA branch'
+assert_eq 'yes' "$(git -C "$repo" show-ref --verify --quiet refs/heads/phase-qa@spec && echo yes || echo no)" 'land: a refusal keeps the QA branch'
 
 # --- report -------------------------------------------------------------------------
 
@@ -302,7 +302,7 @@ assert_eq 'qa: skipped — phase 2 did not land' "$OUT" 'report: skipped, with i
 
 full_ledger() {
   reset_ledger 'run: qa scope — top 5' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' \
-    'batch 1: landed (aaa1)' 'qa: opened — phase-qa-spec at aaa1' \
+    'batch 1: landed (aaa1)' 'qa: opened — phase-qa@spec at aaa1' \
     'qa: flows defined — 7 found, selected 1,2,3,4,5, not walkable 4, parallel yes' \
     'qa flow 1: walked — 0 findings' 'qa flow 2: walked — 3 findings' \
     'qa flow 3: not walked — the simulator would not boot' 'qa flow 5: walked — 1 findings' \
@@ -359,10 +359,10 @@ assert_eq "qa: 3 of 7 flows walked on aaa1 (scope: top 5)
 assert_eq "$before" "$(cat "$ledger")" 'report: writes nothing'
 
 full_ledger
-log 'qa: verified FAIL — unit suite' 'push: phase-qa-spec at 5e6f7a8' \
+log 'qa: verified FAIL — unit suite' 'push: phase-qa@spec at 5e6f7a8' \
   'qa: done — 0 confirmed, 0 still broken, 1 not fixed, 0 new, 1 spec, 2 fixed but not landed'
 qa report
-assert_contains "  fixed on phase-qa-spec, not landed: 2
+assert_contains "  fixed on phase-qa@spec, not landed: 2
     G1 checkout: total ignores the second coupon
     G3 checkout: coupon lost on back navigation
     gates: $rundir/qa-gates-evidence.md" "$OUT" 'report: fixes that failed the gates are listed as not landed'
@@ -423,11 +423,11 @@ nx 'skip phase 2 did not land' 'without a range the ledger header is used'
 
 # The verified commit is the last word of the line, for land as for next.
 git -C "$iwt" switch -q --detach feat/x
-git -C "$repo" branch -q -D phase-qa-spec
+git -C "$repo" branch -q -D phase-qa@spec
 reset_ledger 'run: qa scope — all'
 qa open
 commit_in "$iwt" fix4.txt fix4
-f4=$(tip phase-qa-spec)
+f4=$(tip phase-qa@spec)
 log "qa: verified PASS — full suites all — $f4"
 qa land "$f4"
 assert_rc 0 'land: reads the verified commit as the last word, as next does'

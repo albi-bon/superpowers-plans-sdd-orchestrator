@@ -35,7 +35,7 @@ assert_eq '' "$OUT" 'outside a repository: prints nothing'
 rundir="$repo/.superpowers/phase-parallel/spec"
 mkdir -p "$rundir"
 ledger="$rundir/run.md"
-printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-7\n\n' "$repo/spec.md" > "$ledger"
+printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-7\n# layout: run-scoped\n\n' "$repo/spec.md" > "$ledger"
 log() { printf '%s\n' "$@" >> "$ledger"; }
 log 'run: invoked — cap 3'
 for n in 1 2 3 4 5; do log "phase $n: started — branch phase-$n-x"; done
@@ -77,27 +77,56 @@ wt=$(cd "$repo" && "$WT" "$repo/spec.md" feat/x start 7)
 line "$wt"
 assert_contains 'feat/x · 1/7 merged' "$OUT" 'a session inside a phase worktree finds the run in the main checkout'
 
-# The owner moves the main checkout to a branch without the spec: the run is
-# still shown, read from base's copy in the base worktree.
-git -C "$repo" worktree add -q "$repo/.worktrees/base" -b feat/base-copy feat/x
+# A run's ledger names base's copy, in the run's base worktree; the owner can
+# move the main checkout to a branch without the spec.
+git -C "$repo" worktree add -q "$repo/.worktrees/spec/base" -b feat/base-copy feat/x
+sed -i.bak "1s|.*|# Phase run — spec: $repo/.worktrees/spec/base/spec.md|" "$ledger" && rm "$ledger.bak"
 git -C "$repo" rm -q spec.md
 git -C "$repo" commit -qm 'the main checkout moves on'
 line "$repo"
 assert_contains 'feat/x · 1/7 merged' "$OUT" 'the main checkout lost the spec: the run is found through the base worktree'
-line "$repo/.worktrees/base"
+line "$repo/.worktrees/spec/base"
 assert_contains 'feat/x · 1/7 merged' "$OUT" 'a session inside the base worktree finds the run'
+
+# A second run in the same repository, written to more recently. A session in
+# the main checkout shows the latest; one inside a run's worktrees shows that
+# run.
+git -C "$repo" show feat/base-copy:spec.md > "$tmp/other.md"
+other="$repo/.superpowers/phase-parallel/other"
+mkdir -p "$other"
+printf '# Phase run — spec: %s\n# base: feat/y  requested: 1-2\n# layout: run-scoped\n\n' "$tmp/other.md" > "$other/run.md"
+printf 'phase 1: started — branch phase-1-a@other\n' >> "$other/run.md"
+touch -t "$(date -v-2M +%Y%m%d%H%M 2>/dev/null || date -d '2 minutes ago' +%Y%m%d%H%M)" "$ledger"
+line "$repo"
+assert_eq 'feat/y · 0/2 merged · 1 building · 1 left · +1 runs' "$OUT" 'two runs: the main checkout shows the latest'
+line "$repo/.worktrees/spec/base"
+assert_contains 'feat/x · 1/7 merged' "$OUT" "two runs: a session in one run's base worktree shows that run"
+assert_contains '+1 runs' "$OUT" 'two runs: and counts the other'
+line "$wt"
+assert_contains 'feat/x · 1/7 merged' "$OUT" "two runs: a session in one run's phase worktree shows that run"
+rm -rf "$other"
 
 log 'RUN COMPLETE — phases 1–7 of spec.md'
 line "$repo"
 assert_eq '' "$OUT" 'a finished run is not shown'
 
+# --- a legacy ledger ----------------------------------------------------------------
+# A ledger from before runs were named, written when base lived in the main
+# checkout, names the main checkout's copy: once that is gone, the run is read
+# from the legacy base worktree, .worktrees/base.
+
+git -C "$repo" worktree add -q "$repo/.worktrees/base" -b feat/legacy-copy feat/base-copy
+printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\nphase 1: started — branch phase-1-a\n' "$repo/spec.md" > "$ledger"
+line "$repo"
+assert_eq 'feat/x · 0/2 merged · 1 building · 1 left' "$OUT" 'legacy ledger: read through .worktrees/base'
+
 # --- the QA pass --------------------------------------------------------------------
 
-printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n\n' "$repo/spec.md" > "$ledger"
+printf '# Phase run — spec: %s\n# base: feat/x  requested: 1-2\n# layout: run-scoped\n\n' "$repo/.worktrees/spec/base/spec.md" > "$ledger"
 log 'run: qa scope — all' 'phase 1: merged to base (aaa1)' 'phase 2: merged to base (aaa1)' 'batch 1: landed (aaa1)'
 line "$repo"
 assert_eq 'feat/x · 2/2 merged' "$OUT" 'no QA segment before the pass opens'
-log 'qa: opened — phase-qa-spec at aaa1'
+log 'qa: opened — phase-qa@spec at aaa1'
 line "$repo"
 assert_eq 'feat/x · 2/2 merged · qa planning' "$OUT" 'a QA stage without counts'
 log 'qa: flows defined — 3 found, selected 1,2,3, not walkable -, parallel yes' 'qa flow 1: walked — 0 findings'

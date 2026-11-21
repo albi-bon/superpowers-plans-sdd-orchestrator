@@ -9,8 +9,9 @@
 # worktree finds the run through the main checkout, where the run directory
 # is.
 #
-# The run shown is the most recently written ledger under
-# .superpowers/<namespace>/ whose run has not finished (no 'RUN COMPLETE' or
+# The run shown is the one whose worktrees the session is in, else the most
+# recently written ledger under .superpowers/<namespace>/, among runs that
+# have not finished (no 'RUN COMPLETE' or
 # 'run: PR' line, or an agent dispatched after the last one, as on a resume)
 # and that was written in the last 7 days. Example:
 #
@@ -57,7 +58,17 @@ root="$main/.superpowers/$namespace"
 
 mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 now=$(date +%s)
-best=""; best_t=0; others=0
+# A session inside one run's worktrees, <main>/.worktrees/<run>/…, shows that
+# run rather than the most recently written one.
+own=""
+case "$(cd "$dir" && pwd -P)/" in
+  "$main/.worktrees/"?*/*)
+    own=$(cd "$dir" && pwd -P)
+    own=${own#"$main/.worktrees/"}
+    own="$root/${own%%/*}/run.md"
+    ;;
+esac
+best=""; best_t=0; others=0; mine=""
 for ledger in "$root"/*/run.md; do
   [ -f "$ledger" ] || continue
   # Finished when a finish marker has no dispatch after it; a resumed run
@@ -70,8 +81,10 @@ for ledger in "$root"/*/run.md; do
   [ $((now - t)) -le 604800 ] || continue
   if [ -n "$best" ]; then others=$((others + 1)); fi
   if [ "$t" -gt "$best_t" ]; then best=$ledger; best_t=$t; fi
+  if [ "$ledger" = "$own" ]; then mine=$t; fi
 done
 [ -n "$best" ] || exit 0
+if [ -n "$mine" ]; then best=$own; best_t=$mine; fi
 
 doc=$(sed -n '1s/^# Phase run — spec: //p' "$best")
 base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$best")
@@ -79,6 +92,7 @@ range=$(sed -n '2s/^# base: .*  requested: //p' "$best")
 case "$doc" in /*) ;; *) doc="$main/$doc" ;; esac
 # A ledger from before base had its own worktree names the main checkout's
 # copy, which is gone once the owner moves that checkout to another branch.
+# Such a ledger has the legacy layout, so its base worktree is .worktrees/base.
 if [ ! -f "$doc" ]; then
   case "$doc" in "$main"/*) doc="$main/.worktrees/base/${doc#"$main"/}" ;; esac
 fi

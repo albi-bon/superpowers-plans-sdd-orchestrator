@@ -32,7 +32,7 @@ assert_contains 'use building-phased-specs-in-parallel' "$(sed -n '3p' "$BUILD/S
 for f in scripts/phase-preflight scripts/parse-phases scripts/phase-run-dir scripts/parse-deps \
          scripts/phase-state scripts/phase-schedule scripts/phase-overlap scripts/phase-worktree \
          scripts/phase-batch scripts/phase-land scripts/phase-push scripts/phase-pr scripts/phase-statusline \
-         scripts/phase-qa qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md qa-fix-prompt.md \
+         scripts/phase-qa scripts/phase-layout qa-plan-prompt.md qa-walker-prompt.md qa-triage-prompt.md qa-fix-prompt.md \
          scout-prompt.md lead-prompt.md worker-prompt.md reviewer-prompt.md \
          repair-prompt.md rescue-prompt.md resolver-prompt.md integration-verifier-prompt.md \
          overlap-judge-prompt.md graph-prompt.md testing-policy.md decision-policy.md platform-guide.md; do
@@ -202,7 +202,7 @@ run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
 assert_rc 0 'preflight wrapper: a fresh run passes, whatever the main checkout holds'
 assert_eq 'yes' "$([ -f "$repo/.superpowers/phase-parallel/spec/run.md" ] && echo yes || echo no)" \
   'preflight wrapper: the ledger lives in the phase-parallel namespace, in the main checkout'
-bw="$repo/.worktrees/base"
+bw="$repo/.worktrees/spec/base"
 spec="$bw/spec.md"
 assert_contains "base-worktree $bw" "$OUT" 'preflight wrapper: prints the base worktree'
 assert_contains "design-doc $spec" "$OUT" "preflight wrapper: prints base's copy of the document"
@@ -223,7 +223,7 @@ run_in "$ROOT/scripts/phase-schedule" "$spec" feat/x all 3
 assert_eq "$(printf 'start 1\nstart 2\nwait')" "$OUT" 'schedule wrapper: independent phases start together'
 run_in "$ROOT/scripts/phase-worktree" "$spec" feat/x start 1
 wt=$OUT
-assert_eq "$repo/.worktrees/phase-1-one" "$wt" 'worktree wrapper: phase worktrees sit beside the base worktree'
+assert_eq "$repo/.worktrees/spec/phase-1-one" "$wt" 'worktree wrapper: phase worktrees sit beside the base worktree'
 assert_eq '' "$(git -C "$bw" status --porcelain)" 'the base worktree holds no run files'
 printf 'left behind\n' > "$wt/stray.txt"
 run_in "$ROOT/scripts/phase-preflight" "$spec" feat/x all
@@ -236,5 +236,30 @@ git -C "$repo" commit -qm 'the owner moves the main checkout on'
 run_in "$ROOT/scripts/phase-preflight" "$repo/spec.md" feat/x all
 assert_rc 0 'preflight wrapper: resumes with the first request path after the main checkout moved on'
 assert_contains "design-doc $spec" "$OUT" "preflight wrapper: a resume prints base's copy again"
+
+# A second run in the same repository, while the first is in flight: its own
+# base, integration and phase worktrees and branches, and the first run's
+# dirty phase worktree does not refuse it.
+git -C "$repo" switch -q main
+cp "$repo/spec.md" "$repo/second.md"
+git -C "$repo" add second.md
+git -C "$repo" commit -qm 'a second spec'
+printf 'left behind\n' > "$wt/stray.txt"
+run_in() { set +e; OUT=$(cd "$repo" && "$@" 2>&1); RC=$?; set -e; }
+run_in "$ROOT/scripts/phase-preflight" "$repo/second.md" feat/y all
+assert_rc 0 "two runs: the second's preflight passes beside the first's dirty phase worktree"
+bw2="$repo/.worktrees/second/base"
+assert_contains "base-worktree $bw2" "$OUT" 'two runs: the second has its own base worktree'
+assert_contains "integration-worktree $repo/.worktrees/second/integration" "$OUT" \
+  'two runs: the second has its own integration worktree'
+assert_eq 'feat/x' "$(git -C "$bw" branch --show-current)" "two runs: the first run's base worktree is not switched"
+assert_eq 'feat/y' "$(git -C "$bw2" branch --show-current)" "two runs: the second run's base is in its own worktree"
+run_in "$ROOT/scripts/phase-worktree" "$bw2/second.md" feat/y start 1
+assert_eq "$repo/.worktrees/second/phase-1-one" "$OUT" 'two runs: the same phase number gets a worktree of its own'
+assert_eq 'phase-1-one@second' "$(git -C "$OUT" branch --show-current)" 'two runs: and a branch of its own'
+assert_eq 'phase-1-one@spec' "$(git -C "$wt" branch --show-current)" "two runs: the first run's phase branch is untouched"
+run_in "$ROOT/scripts/phase-layout" "$bw2/second.md"
+assert_contains 'qa-branch phase-qa@second' "$OUT" 'layout wrapper: prints the run-scoped names'
+rm "$wt/stray.txt"
 
 finish

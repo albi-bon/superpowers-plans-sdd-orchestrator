@@ -39,7 +39,7 @@
 # add patterns, read after the built-ins in this order: '.phase-overlap-ignore'
 # at the repository root, then 'overlap-ignore' in the run directory. The
 # repository root is every checkout that can hold the owner's copy: the main
-# checkout, the base worktree (<main checkout>/.worktrees/base, base's
+# checkout, the run's base worktree (phase-layout's base-worktree, base's
 # committed copy) and the one the caller stands in. One
 # pattern per line; '#' starts a comment. A pattern without '/' matches the
 # file name; one with '/' matches the whole path from the repository root, and
@@ -169,7 +169,10 @@ test_*.py
 toplevel=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 main=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 main=${main:-$toplevel}
-ignore_files=$(printf '%s\n' "$main/.phase-overlap-ignore" "$main/.worktrees/base/.phase-overlap-ignore" \
+layout=$("$here/phase-layout" "$doc" 2>/dev/null || true)
+basewt=$(printf '%s\n' "$layout" | sed -n 's/^base-worktree //p')
+suffix=$(printf '%s\n' "$layout" | sed -n 's/^branch-suffix //p')
+ignore_files=$(printf '%s\n' "$main/.phase-overlap-ignore" "${basewt:-$main/.worktrees/base}/.phase-overlap-ignore" \
   "$toplevel/.phase-overlap-ignore" | awk '!seen[$0]++')
 
 patterns=()
@@ -278,7 +281,7 @@ others=$(printf '%s\n' "$state" | awk -F'\t' -v n="$num" '
 found=''
 for other in $others; do
   record=$("$here/parse-phases" "$doc" "$other")
-  branch="phase-$other-$(printf '%s\n' "$record" | cut -f3)"
+  branch="phase-$other-$(printf '%s\n' "$record" | cut -f3)$suffix"
   theirs=$(
     {
       brief_paths "$rundir/phase-$other-brief.md"

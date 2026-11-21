@@ -5,8 +5,10 @@
 # controller that lost its place cannot run a stage twice.
 #
 # The pass works in the run's integration worktree,
-# <main>/.worktrees/integration, on the QA branch phase-qa-<run>, where <run>
-# is the run directory's name: two runs in one repository never share it.
+# <main>/.worktrees/<run>/integration, on the QA branch phase-qa@<run>, where
+# <run> is the run directory's name: two runs in one repository never share
+# either. A ledger from before runs were named keeps .worktrees/integration
+# and phase-qa-<run> (phase-layout).
 # Fixes are committed there and reach base only through 'land', after the
 # ledger shows the integration verifier passed exactly that commit.
 #
@@ -21,8 +23,8 @@
 #             range the ledger was created with is used
 #   close     append 'qa: done — <summary>', counted from the ledger, and
 #             print it
-#   land SHA  fast-forward base to the QA branch in the base worktree,
-#             <main>/.worktrees/base, the only checkout it moves (the main
+#   land SHA  fast-forward base to the QA branch in the run's base
+#             worktree, the only checkout it moves (the main
 #             checkout is the owner's: neither read nor touched), only when
 #             the ledger's last 'qa: verified' line passed exactly SHA;
 #             record 'qa: landed (<sha>)', push base, leave the integration
@@ -158,11 +160,12 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   exit 2
 fi
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-wt="$main/.worktrees/integration"
-basewt="$main/.worktrees/base"
 rundir=$("$here/phase-run-dir" "$doc")
 ledger="$rundir/run.md"
-branch="phase-qa-$(basename "$rundir")"
+layout=$("$here/phase-layout" "$doc")
+wt=$(printf '%s\n' "$layout" | sed -n 's/^integration-worktree //p')
+basewt=$(printf '%s\n' "$layout" | sed -n 's/^base-worktree //p')
+branch=$(printf '%s\n' "$layout" | sed -n 's/^qa-branch //p')
 if [ ! -f "$ledger" ]; then
   echo "no ledger at $ledger: run phase-preflight first" >&2
   exit 2
@@ -181,7 +184,7 @@ registered() {
 ensure_worktree() {
   if ! { registered "$wt" && [ -d "$wt" ]; }; then
     git worktree prune
-    mkdir -p "$main/.worktrees"
+    mkdir -p "$main/.worktrees" "$(dirname "$wt")"
     printf '*\n' > "$main/.worktrees/.gitignore"
     git worktree add -q --detach "$wt" "$base" >&2
   fi

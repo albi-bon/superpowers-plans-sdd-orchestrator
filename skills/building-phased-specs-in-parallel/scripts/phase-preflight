@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # Run the shared phase-preflight under this skill's run-directory namespace,
 # with the base branch in a worktree of its own (PHASE_BASE_CHECKOUT=worktree):
-# <main checkout>/.worktrees/base. The main checkout is the owner's — never
-# switched, never required to be clean. PHASE_RUN_ANCHOR=main keeps the run
-# directory in the main checkout whichever worktree the caller stands in.
+# <main checkout>/.worktrees/<run>/base, where <run> is the run directory's
+# name, so several runs can share one repository (phase-layout). The main
+# checkout is the owner's — never switched, never required to be clean.
+# PHASE_RUN_ANCHOR=main keeps the run directory in the main checkout whichever
+# worktree the caller stands in.
 #
 # Then refuse a run whose phase worktrees hold an interrupted agent's changes,
-# or whose repository has no origin remote to push to. The shared preflight
-# checks the base worktree; .worktrees/ ignores itself, so a dirty phase
-# worktree would otherwise pass unnoticed. This skill pushes phase branches
+# or whose repository has no origin remote to push to. Only this run's phase
+# worktrees are checked: another run's are its own business. The shared
+# preflight checks the base worktree; .worktrees/ ignores itself, so a dirty
+# phase worktree would otherwise pass unnoticed. This skill pushes phase branches
 # and base to origin and opens a pull request at the end, so a missing remote
 # refuses the run before anything starts rather than after the last phase.
 # `pwd -P` resolves the installed skill symlink to this checkout, where
 # shared/ lives.
 #
 # Prints the shared preflight's lines: 'preflight ok: …', then
-#   base-worktree <path>   where the controller works from
-#   design-doc <path>      the document to pass to every later script and agent
+#   base-worktree <path>         where the controller works from
+#   integration-worktree <path>  where batches are built, verified and QA'd
+#   design-doc <path>            the document to pass to every later script and agent
 #
 # Exit codes: those of the shared preflight and phase-worktree check, and
 #   16  the repository has no 'origin' remote
