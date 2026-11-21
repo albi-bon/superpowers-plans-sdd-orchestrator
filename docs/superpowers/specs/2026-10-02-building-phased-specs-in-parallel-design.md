@@ -251,8 +251,8 @@ a lone queued phase goes alone. At most one batch is open, and base moves only w
 batch lands, so base cannot move under a batch. Other phases keep building meanwhile.
 
 1. `phase-batch open N@SHA …` checks each phase branch is at its queued SHA, records
-   `batch <K>: opened — phases <N>@<sha> …`, and creates `phase-batch-<K>` at the base
-   tip in one integration worktree, `<repo>/.worktrees/integration`, reused by every
+   `batch <K>: opened — phases <N>@<sha> …`, and creates `phase-batch-<K>@<run>` at the
+   base tip in one integration worktree, `<repo>/.worktrees/<run>/integration`, reused by every
    batch so its installed dependencies carry over. It merges the phases onto the batch
    branch one after another, each with `git merge --no-ff <sha> -m "merge: phase <N> —
    <title>"` — the subject base's history has always used, so a landed batch reads on
@@ -377,10 +377,20 @@ Added with batch integration.
 | Integration setup marker | `<run-dir>/integration-setup` |
 | Report (PR body) | `<run-dir>/report.md` |
 | Rescue report | `<run-dir>/phase-<N>-rescue-report.md` |
-| Worktree | `<repo>/.worktrees/phase-<N>-<slug>/` |
-| Phase branch | `phase-<N>-<slug>` |
-| Integration worktree | `<repo>/.worktrees/integration/` |
-| Batch branch | `phase-batch-<K>` |
+| Base worktree | `<repo>/.worktrees/<run>/base/` |
+| Worktree | `<repo>/.worktrees/<run>/phase-<N>-<slug>/` |
+| Phase branch | `phase-<N>-<slug>@<run>` |
+| Integration worktree | `<repo>/.worktrees/<run>/integration/` |
+| Batch branch | `phase-batch-<K>@<run>` |
+| QA branch | `phase-qa@<run>` |
+
+`<run>` is the run directory's name, the spec's basename. Every worktree and branch a
+run creates carries it, so several runs can share one repository, each on its own base
+branch; `phase-layout` prints a run's names and every script asks it. Preflight writes
+`# layout: run-scoped` into a new ledger. A ledger without that line was started before
+runs were named and keeps that run's names until it finishes: `.worktrees/base`,
+`.worktrees/integration`, `.worktrees/phase-<N>-<slug>/`, and branches without the
+`@<run>` suffix (`phase-qa-<run>` for the QA branch).
 
 The run directory lives in the main checkout. Agents in worktrees reach it by absolute
 path; worktrees hold code only.

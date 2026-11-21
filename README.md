@@ -17,8 +17,11 @@ it. The sequential three run exactly one
 repair attempt per phase; the parallel skill allows a repair and a rescue. The
 sequential three work in the checkout they are invoked in and switch it to the
 base branch. The parallel skill keeps the base branch in a worktree of its own,
-`.worktrees/base`, and works from there: it never switches the main checkout or
-needs it clean, so that checkout stays free for other work during a run. Each
+`.worktrees/<run>/base`, and works from there: it never switches the main
+checkout or needs it clean, so that checkout stays free for other work during a
+run. `<run>` is the design document's basename; every worktree and branch a
+parallel run creates carries it, so several parallel runs, each on its own base
+branch, can share one repository. Each
 skill keeps its runs in its own run directory (`.superpowers/phase-builder/`,
 `.superpowers/phase-orchestrator/`, `.superpowers/phase-executor/` and
 `.superpowers/phase-parallel/`).
@@ -81,8 +84,8 @@ those plans executed inline or name it.
 ```
 shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
-                         phase-overlap, phase-worktree, phase-batch, phase-land, phase-push, phase-pr,
-                         phase-qa, phase-statusline
+                         phase-layout, phase-overlap, phase-worktree, phase-batch, phase-land, phase-push,
+                         phase-pr, phase-qa, phase-statusline
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill
 skills/<name>/           SKILL.md, dispatch templates, platform guide
 skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace

@@ -37,7 +37,7 @@ over an earlier one when the later phase is the one being built.
 
 Several phases are built at once, each in its own git worktree on its own
 branch. You work only inside the worktree you were given. You never touch the
-main checkout, the base branch or its worktree (`.worktrees/base`), or another
+main checkout, the base branch or its worktree (`.worktrees/<run>/base`), or another
 phase's worktree or branch — not to read their uncommitted work, not to borrow
 a fix, not to tidy up. Another phase's work reaches yours only through the
 base branch, after it has been verified and merged.

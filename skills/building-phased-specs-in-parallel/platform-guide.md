@@ -47,11 +47,13 @@ one task. Release finished agents if the host counts retained agents against its
 limit.
 
 Every agent works in its phase's worktree — the resolver and the integration
-verifier in the run's integration worktree, `.worktrees/integration` — never in
-the main checkout. The controller works from the base worktree,
-`.worktrees/base`, where the base branch is checked out and batches land. The
-main checkout belongs to its owner for the whole run: nothing switches it,
-reads it or needs it clean. Give each agent the absolute `WORKTREE` path and
+verifier in the run's integration worktree, `.worktrees/<run>/integration` —
+never in the main checkout. The controller works from the base worktree,
+`.worktrees/<run>/base`, where the base branch is checked out and batches land.
+`<run>` is the run directory's name, the design document's basename, and every
+branch the run creates ends in `@<run>`, so several runs can work in one
+repository at once, each on its own base branch. The main checkout belongs to
+its owner for the whole run: nothing switches it, reads it or needs it clean. Give each agent the absolute `WORKTREE` path and
 absolute artifact paths; never rely on an inherited working directory — an
 agent dispatched from the base worktree inherits that one.
 
@@ -120,14 +122,15 @@ the root test command anyway costs minutes, and in a parallel run slows every
 phase on the machine.
 
 A repository can enforce it with a Claude Code `PreToolUse` hook on Bash of
-its own. On a `phase-<N>-<slug>` branch, and on the `phase-batch-<K>` branches
-the resolver works on, it refuses whole-suite and
-production-build commands unless they start with `FULL_CHECKS=1`, which only
-the verifier templates mention; it refuses a test command identical to one
-that already finished on the same tree; and it appends every check it sees to
-`<git common dir>/agent-checks.log`, in the format the header of
-`shared/scripts/phase-metrics` gives. The skill neither installs nor requires
-it. With or without it, each landing appends a `metrics` line per phase to
+its own. On a phase branch, `phase-<N>-<slug>@<run>`, and on the
+`phase-batch-<K>@<run>` branches the resolver works on, it refuses whole-suite
+and production-build commands unless they start with `FULL_CHECKS=1`, which
+only the verifier templates mention; it refuses a test command identical to
+one that already finished on the same tree; and it appends every check it sees
+to `<git common dir>/agent-checks.log`, in the format the header of
+`shared/scripts/phase-metrics` gives. Phase branches start with `phase-<N>-`
+in every run, so a hook that matches that prefix finds them. The skill
+neither installs nor requires it. With or without it, each landing appends a `metrics` line per phase to
 the ledger: lines of source and test the phase added, and the log's counts
 when there is one.
 
@@ -208,7 +211,8 @@ batch, in or awaiting the ladder); held; failed; not started. During the QA
 pass it adds the pass's stage, for example `qa walking 3/5`. It adds
 `draining` while the run drains, `idle <age>` when the ledger has not changed
 for 15 minutes, and `+N runs` when other runs are active. It reads only the
-ledger, through `phase-state`, and always exits 0.
+ledger, through `phase-state`, and always exits 0. A session inside one run's
+worktrees shows that run; elsewhere the line shows the run written to last.
 
 Without a status line of your own, point Claude Code at it in
 `~/.claude/settings.json`:

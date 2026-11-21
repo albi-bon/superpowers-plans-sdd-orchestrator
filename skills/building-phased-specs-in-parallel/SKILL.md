@@ -21,6 +21,11 @@ files: its owner keeps working in it, on any branch, while the run goes on.
 Only two git-ignored directories of the run sit inside it, `.worktrees/` and
 `.superpowers/`.
 
+**Several runs can share one repository.** A run is named after its run
+directory, the document's basename (`<run>` below). Its worktrees sit in
+`.worktrees/<run>/` and every branch it creates ends in `@<run>`, so two runs,
+each on its own base branch, never touch each other's worktrees or branches.
+
 Per phase, the work is `building-phased-specs`' work: a scout writes a brief, a
 phase lead has workers build it task by task, one reviewer, one fix wave, a
 verifier with an acceptance check — here run on the batch, on the tree that
@@ -94,18 +99,25 @@ Every check must pass or the run does not start. On a non-zero exit, stop and
 show the script's stderr verbatim — it names the failed check and the command
 that fixes it. Do not work around a refusal, and do not run that command
 yourself. When `BASE` is checked out in the main checkout, the owner frees the
-branch: the run never switches a checkout it does not own.
+branch: the run never switches a checkout it does not own. When another run's
+worktree holds `BASE`, this run needs a base branch of its own. A base
+worktree on another branch is refused, never switched.
 
 On success `BASE` is checked out in the base worktree,
-`REPO_ROOT/.worktrees/base`, created if it was missing. The base worktree and
-every phase worktree of an earlier run are clean, an `origin` remote exists,
-and the ledger exists. The main checkout is as its owner left it. Preflight
-prints two lines to keep:
+`REPO_ROOT/.worktrees/<run>/base`, created if it was missing. The base worktree
+and every phase worktree this run started earlier are clean, an `origin`
+remote exists, and the ledger exists. Other runs' worktrees are not looked at.
+The main checkout is as its owner left it. Preflight prints three lines to
+keep:
 
 | Line | Keep as |
 |---|---|
 | `base-worktree <path>` | `BASE_WORKTREE` |
+| `integration-worktree <path>` | `INTEGRATION_WORKTREE`, where batches are built and verified and the QA pass works |
 | `design-doc <path>` | `DESIGN_DOC`, replacing the path in the request |
+
+`"$SKILL_DIR/scripts/phase-layout" "$DESIGN_DOC"` prints these worktrees again
+at any time, with the run's branch suffix (`branch-suffix @<run>`).
 
 The new `DESIGN_DOC` is base's copy of the document, which stays where it is
 when the owner switches the main checkout. The run builds the document as
@@ -145,7 +157,7 @@ Append `run: invoked — cap <CAP>` and `run: models — <MODEL_MAPPING>` to the
 ledger, and `run: qa scope — <QA_SCOPE>`
 only when the request stated a scope or the ledger had none: a new scope line
 makes an earlier `qa: skipped` stop counting (§ Resume). Keep `SKILL_DIR`,
-`REPO_ROOT`, `BASE_WORKTREE`,
+`REPO_ROOT`, `BASE_WORKTREE`, `INTEGRATION_WORKTREE`,
 `DESIGN_DOC`, `BASE`, `RANGE`, `CAP`, `SETUP_COMMAND`, `FULL_SUITE_POLICY`,
 `PR_TARGET`, `QA_SCOPE`, `RUN_DIR`, the phase records and `MODEL_MAPPING`. Everything
 else belongs in the ledger.
@@ -229,7 +241,7 @@ Per-phase values, all absolute:
 | Value | Path or source |
 |---|---|
 | `WORKTREE` | `phase-worktree … path N` |
-| `PHASE_BRANCH` | `phase-<N>-<slug>` |
+| `PHASE_BRANCH` | `phase-<N>-<slug>@<run>` |
 | `PHASE_BASE_SHA` | `git merge-base "$BASE" "$PHASE_BRANCH"`, taken when you dispatch the lead |
 | Brief | `RUN_DIR/phase-<N>-brief.md` |
 | Decisions | `RUN_DIR/phase-<N>-decisions.md` |
@@ -245,8 +257,8 @@ Per-batch values, all absolute:
 
 | Value | Path or source |
 |---|---|
-| `WORKTREE` (resolver, integration verifier) | `REPO_ROOT/.worktrees/integration`, the one integration worktree every batch reuses |
-| `BATCH_BRANCH` | `phase-batch-<K>` |
+| `WORKTREE` (resolver, integration verifier) | `INTEGRATION_WORKTREE`, the one integration worktree every batch of the run reuses |
+| `BATCH_BRANCH` | `phase-batch-<K>@<run>` |
 | `BATCH_PHASES` | every phase `phase-state` lists as `batched` in batch K: number, title, brief path, decisions path |
 | Batch evidence | `RUN_DIR/batch-<K>-evidence.md`; the final check's is `RUN_DIR/final-evidence.md` |
 | `EARLIER_EVIDENCE` | every existing `RUN_DIR/batch-*-evidence.md` other than this batch's, or `none` |
@@ -341,7 +353,7 @@ again without the culprit. Pinning keeps that cost to one extra verification,
 and base still only ever holds trees a verifier passed.
 
 `phase-batch open` checks each phase branch is at its queued sha, records
-`batch <K>: opened — phases <N>@<sha> …`, creates `phase-batch-<K>` at the base
+`batch <K>: opened — phases <N>@<sha> …`, creates `phase-batch-<K>@<run>` at the base
 tip in the integration worktree, and merges the phases onto it one after
 another, each as `merge: phase <N> — <title>`. `phase-batch build K` carries on
 after a resolver. Both print one outcome:
@@ -536,7 +548,7 @@ Dispatch values, all absolute:
 
 | Value | Path or source |
 |---|---|
-| `WORKTREE` | `REPO_ROOT/.worktrees/integration`, for every QA agent |
+| `WORKTREE` | `INTEGRATION_WORKTREE`, for every QA agent |
 | `QA_BRANCH` | the branch the ledger's `qa: opened` line names |
 | `PHASES` | every requested phase: number, title, brief path, decisions path |
 | `FLOWS_PATH`, `TRIAGE_PATH` | `RUN_DIR/qa-flows.md`, `RUN_DIR/qa-triage.md` |
@@ -574,18 +586,19 @@ the pass closes.
 Append as you go; never truncate it. Example:
 
 ```markdown
-# Phase run — spec: /repo/.worktrees/base/docs/specs/…-design.md
+# Phase run — spec: /repo/.worktrees/…-design/base/docs/specs/…-design.md
 # base: feat/thing  requested: 2-6
+# layout: run-scoped
 
 graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)
 run: invoked — cap 3
 run: qa scope — top 5
-phase 2: started — branch phase-2-shell, worktree .worktrees/phase-2-shell
+phase 2: started — branch phase-2-shell@…-design, worktree .worktrees/…-design/phase-2-shell
 phase 2: scout dispatched
 phase 2: grounded — brief phase-2-brief.md, 6 tasks, 3 drift, 1 significant
 phase 2: lead dispatched
 phase 2: executed — a1b2c3d..9f8e7d6, review 0/2/5 (2 fixed, 5 deferred), 2 significant
-push: phase-2-shell at 9f8e7d6
+push: phase-2-shell@…-design at 9f8e7d6
 batch 1: opened — phases 2@9f8e7d6
 phase 2: batched — batch 1, clean merge 1a2b3c4
 batch 1: built 1a2b3c4
@@ -595,8 +608,8 @@ phase 2: merged to base (1a2b3c4)
 phase 2: metrics — source +412, tests +188 (0.46 per source line), 3 new test files; checks: no agent-checks log
 batch 1: landed (1a2b3c4)
 push: feat/thing at 1a2b3c4
-phase 3: started — branch phase-3-api, worktree .worktrees/phase-3-api
-phase 4: started — branch phase-4-ui, worktree .worktrees/phase-4-ui
+phase 3: started — branch phase-3-api@…-design, worktree .worktrees/…-design/phase-3-api
+phase 4: started — branch phase-4-ui@…-design, worktree .worktrees/…-design/phase-4-ui
 …
 batch 2: opened — phases 3@8f9a0b1 4@2c3d4e5
 phase 3: batched — batch 2, clean merge 3d4e5f6
@@ -614,7 +627,7 @@ phase 4: repair dispatched
 phase 4: executed — repaired, HEAD 6e7f8a9
 …
 run: final check skipped — batch 5 ran every full suite
-qa: opened — phase-qa-…-design at 7a8b9c0
+qa: opened — phase-qa@…-design at 7a8b9c0
 qa: planner dispatched
 qa: flows defined — 7 found, selected 1,2,3,4,5, not walkable 4, parallel yes
 qa flow 1: walker dispatched
@@ -709,6 +722,16 @@ such ledgers:
   like any phase. A phase worktree left mid-merge fails preflight: the owner
   finishes or aborts that merge first.
 
+A ledger without the `# layout: run-scoped` header line was started before
+runs were named, and keeps that run's names until it finishes: base in
+`REPO_ROOT/.worktrees/base`, the integration worktree in
+`REPO_ROOT/.worktrees/integration`, phase worktrees in
+`REPO_ROOT/.worktrees/phase-<N>-<slug>`, and branches without the `@<run>`
+suffix (`phase-<N>-<slug>`, `phase-batch-<K>`, `phase-qa-<run>`). Every
+script reads the ledger and follows it; take the worktrees from preflight's
+output, and leave the suffix off `PHASE_BRANCH` and `BATCH_BRANCH`. Only one
+such run can be in a repository at a time, but new runs build beside it.
+
 A run started before base had a worktree of its own left `BASE` checked out in
 the main checkout. Preflight refuses it and names the command: the owner moves
 the main checkout to another branch, and the next invocation resumes in the
@@ -747,7 +770,7 @@ graph: 2→{} 3→{2} 4→{2} 5→{3,4} 6→{5} (source: line)   cap 3
 phase 2  merged  a1b2c3d..1a2b3c4  review 0/2/5  2 fixed  5 deferred  batch 1 (alone)  verified: first pass
 phase 3  merged  …  review 1/1/2  batch 2 failed on 4, landed in batch 3  verified: first pass
 phase 4  merged  …  held on 3 (domain: both reshape the session store)  conflict resolved in batch 2  verified: after repair, batch 4
-phase 5  FAILED  ladder exhausted — evidence <path>, worktree .worktrees/phase-5-…
+phase 5  FAILED  ladder exhausted — evidence <path>, worktree .worktrees/…-design/phase-5-…
 phase 6  not started (depends on 5)
 
 batches: 5 built, 4 landed, 1 failed (pinned)
@@ -803,15 +826,16 @@ State these to your human partner when they matter.
    limits and spend grow with them.
 6. **One install per worktree**: the setup's disk and time, per phase, plus
    the integration worktree, which keeps its install across batches.
-7. **The run's directories sit inside the main checkout.** `.worktrees/` —
-   the base worktree, the integration worktree and the phase worktrees — and
-   `.superpowers/`, the run directory, are both git-ignored. Tools the owner
+7. **The run's directories sit inside the main checkout.** `.worktrees/<run>/`
+   — the base worktree, the integration worktree and the phase worktrees — and
+   `.superpowers/phase-parallel/<run>/`, the run directory, are both
+   git-ignored. Other runs keep theirs beside them. Tools the owner
    runs there see the nested checkouts; test runners and file watchers may need
    `.worktrees` excluded. The owner may switch branches, edit and commit in
    the main checkout during a run, but deletes neither directory, and Git
    refuses to check out `BASE` or a phase branch there while a worktree holds
    it. The base and integration worktrees stay after the run, for the pull
-   request's follow-up or the next run; `git worktree remove` clears them.
+   request's follow-up or a resume; `git worktree remove` clears them.
 8. **The run pushes.** Phase branches and base go to `origin` as the run
    progresses, and a pull request is opened at the end — a draft when a phase
    did not land or the final check failed. Nothing is merged into the target.

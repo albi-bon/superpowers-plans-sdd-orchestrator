@@ -148,11 +148,12 @@ phases take it, and a flow that cannot start without such a phase is
 Every stage runs once. Its outcome line in the ledger is what says it ran, and no stage
 has an action that leads back to an earlier one (§4.6).
 
-All QA agents work in the run's integration worktree, `.worktrees/integration`. It
+All QA agents work in the run's integration worktree, `.worktrees/<run>/integration`. It
 already has the repository's dependencies installed, and no batch is open at this
 point. The pass starts with `phase-qa open` (§4.8), which puts that worktree on a new
-branch at the base tip: `phase-qa-<run>`, where `<run>` is the name of the run
-directory, so two runs in one repository never share it. This document calls it the QA
+branch at the base tip: `phase-qa@<run>`, where `<run>` is the name of the run
+directory, so two runs in one repository never share it (`phase-qa-<run>` in a ledger
+from before runs were named). This document calls it the QA
 branch.
 
 **Stage 1 — Define the flows.** The controller dispatches the **QA planner**. It reads
@@ -400,7 +401,7 @@ of `phase-batch` and `phase-land`.
 | `next [RANGE]` | judges "every requested phase merged" on `RANGE`, the phases this invocation asked for (the ledger header's range without it); reads only the ledger and prints one action: `skip <reason>`, `open`, `plan`, `walk <F>…`, `triage`, `fix <G>`, `verify <sha>`, `land <sha>`, `push`, `recheck <F>…`, `close`, or `done` |
 | `close` | appends `qa: done — <summary>`, the summary computed from the ledger |
 | `status` | prints the pass's stage and progress for the status line, or nothing when no pass is active |
-| `land SHA` | fast-forwards base to the QA branch in the base worktree (`.worktrees/base`; the main checkout is the owner's and is never touched), refusing unless the ledger shows `qa: verified PASS` for exactly that commit and the base worktree is clean and on base; appends `qa: landed (<sha>)`; pushes base through `phase-push`; puts the integration worktree on the base tip, detached; deletes the QA branch |
+| `land SHA` | fast-forwards base to the QA branch in the base worktree (`.worktrees/<run>/base`; the main checkout is the owner's and is never touched), refusing unless the ledger shows `qa: verified PASS` for exactly that commit and the base worktree is clean and on base; appends `qa: landed (<sha>)`; pushes base through `phase-push`; puts the integration worktree on the base tip, detached; deletes the QA branch |
 | `push` | pushes the QA branch as a backup after a gates `FAIL`, recording the outcome like `phase-push`; a branch that is gone is recorded as a failed push, so `next` always moves on |
 | `report` | prints the report's QA block from the ledger, the flows index, the triage index and the recheck files |
 
