@@ -59,17 +59,23 @@
 # repair if it is unused, then the rescue; an unresolved merge goes straight
 # to the rescue.
 #
+# With --ledger it reads the ledger at that path and creates nothing:
+# phase-runs reads other runs' ledgers that way, whose documents may be gone.
+#
 # Usage: phase-state DESIGN_DOC
+#        phase-state --ledger LEDGER
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  echo "usage: phase-state DESIGN_DOC" >&2
+if [ "$#" -eq 2 ] && [ "$1" = --ledger ]; then
+  ledger=$2
+elif [ "$#" -eq 1 ]; then
+  here=$(cd "$(dirname "$0")" && pwd)
+  rundir=$("$here/phase-run-dir" "$1")
+  ledger="$rundir/run.md"
+else
+  echo "usage: phase-state DESIGN_DOC | phase-state --ledger LEDGER" >&2
   exit 2
 fi
-
-here=$(cd "$(dirname "$0")" && pwd)
-rundir=$("$here/phase-run-dir" "$1")
-ledger="$rundir/run.md"
 
 if [ ! -f "$ledger" ]; then
   printf 'run\tnormal\n'

@@ -116,6 +116,12 @@ keep:
 | `integration-worktree <path>` | `INTEGRATION_WORKTREE`, where batches are built and verified and the QA pass works |
 | `design-doc <path>` | `DESIGN_DOC`, replacing the path in the request |
 
+After them preflight prints `other-run <run> <base> <state>` for each other
+parallel run active in the repository, and records their names in the ledger
+as `run: concurrent — <run>, …`. They never stop this run. Name them in your
+first status message to the owner, who caps each run's concurrency.
+`"$SKILL_DIR/scripts/phase-runs" "$DESIGN_DOC"` lists them again at any time.
+
 `"$SKILL_DIR/scripts/phase-layout" "$DESIGN_DOC"` prints these worktrees again
 at any time, with the run's branch suffix (`branch-suffix @<run>`).
 
@@ -791,6 +797,7 @@ qa: 4 of 7 flows walked on 3f4a5b6 (scope: top 5)
   outside this run: 2
   details: <run-dir>/qa-triage.md, <run-dir>/qa-flows.md
 base feat/thing pushed at 7a8b9c0
+concurrent runs: <the names on the ledger's `run: concurrent` lines, or none>
 models: <the last `run: models` line's mapping>
   top tier fell back to strong at <the ledger line before that one>   (only when the mapping changed)
 

@@ -21,6 +21,12 @@
 #   base-worktree <path>         where the controller works from
 #   integration-worktree <path>  where batches are built, verified and QA'd
 #   design-doc <path>            the document to pass to every later script and agent
+#   other-run <run> <base> <state>   one per other parallel run active in this
+#                                repository (phase-runs), for the owner to know about
+#
+# When there are other runs, 'run: concurrent — <run>, <run>' is appended to
+# the ledger. They never refuse a run: each run's concurrency is the owner's
+# to cap.
 #
 # Exit codes: those of the shared preflight and phase-worktree check, and
 #   16  the repository has no 'origin' remote
@@ -46,3 +52,9 @@ out=$(PHASE_BASE_CHECKOUT=worktree "$shared/phase-preflight" "$@")
 doc=$(printf '%s\n' "$out" | sed -n 's/^design-doc //p')
 "$shared/phase-worktree" "$doc" "$2" check
 printf '%s\n' "$out"
+others=$("$shared/phase-runs" "$doc" 2>/dev/null) || others=""
+if [ -n "$others" ]; then
+  printf '%s\n' "$others" | sed 's/^/other-run /'
+  names=$(printf '%s\n' "$others" | cut -d' ' -f1 | paste -sd, - | sed 's/,/, /g')
+  printf 'run: concurrent — %s\n' "$names" >> "$("$shared/phase-run-dir" "$doc")/run.md"
+fi

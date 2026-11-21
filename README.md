@@ -85,7 +85,7 @@ those plans executed inline or name it.
 shared/scripts/          parse-phases, phase-run-dir, phase-preflight, phase-start, phase-finish, phase-metrics,
                          and for the parallel skill parse-deps, phase-state, phase-schedule,
                          phase-layout, phase-overlap, phase-worktree, phase-batch, phase-land, phase-push,
-                         phase-pr, phase-qa, phase-statusline
+                         phase-pr, phase-qa, phase-runs, phase-statusline
 shared/scripts/__tests__ the shell test suite for scripts, installer and every skill
 skills/<name>/           SKILL.md, dispatch templates, platform guide
 skills/<name>/scripts/   thin wrappers that set the skill's run-directory namespace

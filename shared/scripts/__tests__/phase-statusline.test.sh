@@ -70,7 +70,7 @@ assert_eq 'feat/x · 1/7 merged · draining · 1 building · 2 queued · 1 held 
 
 touch -t 202001010000 "$ledger"
 line "$repo"
-assert_eq '' "$OUT" 'a ledger untouched for over a week is not shown'
+assert_eq '' "$OUT" 'a ledger untouched for over a day, with no worktree left, is not shown'
 touch "$ledger"
 
 wt=$(cd "$repo" && "$WT" "$repo/spec.md" feat/x start 7)
@@ -137,7 +137,7 @@ assert_eq 'feat/x · 2/2 merged · qa walking 1/3' "$OUT" 'a QA stage with progr
 # status line finds its siblings beside itself, so a copy gets a stand-in.
 fake="$tmp/fake-scripts"
 mkdir -p "$fake"
-cp "$here"/../parse-phases "$here"/../phase-state "$here"/../phase-run-dir "$here"/../phase-statusline "$fake"/
+cp "$here"/../parse-phases "$here"/../phase-state "$here"/../phase-run-dir "$here"/../phase-runs "$here"/../phase-statusline "$fake"/
 printf '#!/usr/bin/env bash\necho boom\necho boom >&2\nexit 3\n' > "$fake/phase-qa"
 chmod +x "$fake/phase-qa"
 set +e

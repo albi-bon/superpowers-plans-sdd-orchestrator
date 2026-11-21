@@ -210,8 +210,10 @@ resolving, verifying, landing) with its phase count; repairing (failed in a
 batch, in or awaiting the ladder); held; failed; not started. During the QA
 pass it adds the pass's stage, for example `qa walking 3/5`. It adds
 `draining` while the run drains, `idle <age>` when the ledger has not changed
-for 15 minutes, and `+N runs` when other runs are active. It reads only the
-ledger, through `phase-state`, and always exits 0. A session inside one run's
+for 15 minutes, and `+N runs` when other runs are active, as `phase-runs`
+counts them: not finished, and with a worktree left or a ledger written in
+the last day. It reads only the ledgers, through `phase-state` and
+`phase-runs`, and always exits 0. A session inside one run's
 worktrees shows that run; elsewhere the line shows the run written to last.
 
 Without a status line of your own, point Claude Code at it in

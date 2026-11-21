@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Run the shared phase-runs under this skill's run-directory namespace, so it
+# lists this skill's runs and no other skill's. `pwd -P` resolves the
+# installed skill symlink to this checkout, where shared/ lives.
+# PHASE_RUN_ANCHOR=main matches the other wrappers; phase-runs always reads
+# the main checkout's run directory.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd -P)
+export PHASE_RUN_NAMESPACE=phase-parallel
+export PHASE_RUN_ANCHOR=main
+exec "$here/../../../shared/scripts/phase-runs" "$@"

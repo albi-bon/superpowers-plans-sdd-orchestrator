@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# List the other parallel runs active in this repository. Reads only: it
+# creates no run directory and touches no ledger, worktree or branch. It is
+# for awareness: nothing here locks, holds or schedules anything.
+#
+# Runs are the ledgers under <main>/.superpowers/<namespace>/<run>/run.md
+# (PHASE_RUN_NAMESPACE, default phase-orchestrator). Ledgers of finished runs
+# stay on disk, and so do ledgers of runs nobody finished, so a run counts as
+# active only when both hold:
+#
+#   1. It has not finished. A run finishes by writing its report into the
+#      ledger ('RUN COMPLETE — …') or opening its pull request ('run: PR …').
+#      A finished run that is resumed is active again: after its last finish
+#      line comes a 'run: invoked' line, or an agent dispatch the skill
+#      writes ('phase 4: lead dispatched', 'qa flow 2: walker dispatched',
+#      'run: final check dispatched').
+#   2. It shows signs of life. It still has a registered worktree whose
+#      directory exists, or its ledger changed in the last PHASE_RUNS_RECENT
+#      seconds (default 86400, a day). A run-scoped run's worktrees are the
+#      ones under <main>/.worktrees/<run>/. A legacy run (a ledger without
+#      the '# layout: run-scoped' line) shares <main>/.worktrees/ with
+#      nothing else of its own, so its worktrees are the ones there that hold
+#      its base, a phase branch its ledger started, one of its batch branches
+#      or its QA branch.
+#
+# With DESIGN_DOC, the run named after it (the document's basename) is left
+# out: that is the caller's own run. phase-statusline counts runs through
+# this script, so the two always agree on what is active.
+#
+# Prints one line per active run, by name:
+#
+#   <run> <base> <state>
+#
+# where state summarises its ledger, for example
+# '3/30 merged · 2 building · 1 queued · batch 20 verifying · idle 2h'
+# (merged of requested when the document is still readable, then non-zero
+# counts from phase-state, the open batch, and idle once the ledger has been
+# quiet for over 15 minutes). With --names, only the names are printed.
+#
+# Exit codes:
+#   0   ok, whether or not any run is listed
+#   2   usage error, or not inside a git repository
+#
+# Usage: phase-runs [--names] [DESIGN_DOC]
+set -euo pipefail
+
+usage() {
+  echo "usage: phase-runs [--names] [DESIGN_DOC]" >&2
+  exit 2
+}
+
+here=$(cd "$(dirname "$0")" && pwd)
+namespace=${PHASE_RUN_NAMESPACE:-phase-orchestrator}
+recent=${PHASE_RUNS_RECENT:-86400}
+
+names_only=no
+if [ "${1:-}" = --names ]; then
+  names_only=yes
+  shift
+fi
+[ "$#" -le 1 ] || usage
+self=""
+if [ "$#" -eq 1 ]; then
+  self=$(basename "$1" .md)
+fi
+
+if ! main=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p') || [ -z "$main" ]; then
+  echo "not inside a git repository: cd to the repository the runs land in" >&2
+  exit 2
+fi
+root="$main/.superpowers/$namespace"
+[ -d "$root" ] || exit 0
+
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+now=$(date +%s)
+
+# Every registered worktree whose directory exists, as '<path><TAB><branch>'
+# (branch empty when detached).
+worktrees=""
+while IFS="$(printf '\t')" read -r path branch; do
+  [ -n "$path" ] && [ -d "$path" ] || continue
+  worktrees="$worktrees$path	$branch
+"
+done <<EOF
+$(git worktree list --porcelain | awk '
+  /^worktree / { if (p != "") print p "\t" b; p = substr($0, 10); b = "" }
+  /^branch refs\/heads\// { b = substr($0, 19) }
+  END { if (p != "") print p "\t" b }')
+EOF
+
+finished() { # finished LEDGER — has the run finished, and not been resumed since?
+  awk '
+    /^RUN COMPLETE|^run: PR / { fin = 1; resumed = 0; next }
+    fin && (/^run: invoked/ || /^[a-z]+( [a-z]+)?( [0-9]+)?: [a-z ]+ dispatched$/) { resumed = 1 }
+    END { exit !(fin && !resumed) }
+  ' "$1"
+}
+
+has_worktree() { # has_worktree RUN LEDGER — does a worktree of this run exist?
+  WORKTREES=$worktrees awk -v main="$main" -v run="$1" '
+    FNR == 1 { legacy = 1 }
+    /^# layout: run-scoped$/ { legacy = 0 }
+    FNR == 2 { b = $0; sub(/^# base: /, "", b); sub(/  requested: .*$/, "", b); mine[b] = 1 }
+    / started — branch / {
+      b = $0; sub(/^.* started — branch /, "", b); sub(/[, ].*$/, "", b); mine[b] = 1
+    }
+    /^batch [0-9]+: opened/ { k = $2; sub(/:$/, "", k); mine["phase-batch-" k] = 1 }
+    END {
+      mine["phase-qa-" run] = 1
+      n = split(ENVIRON["WORKTREES"], rows, "\n")
+      for (i = 1; i <= n; i++) {
+        if (split(rows[i], f, "\t") < 1 || f[1] == "") continue
+        if (!legacy) {
+          if (index(f[1], main "/.worktrees/" run "/") == 1) exit 0
+        } else {
+          rest = f[1]
+          if (index(rest, main "/.worktrees/") != 1) continue
+          rest = substr(rest, length(main "/.worktrees/") + 1)
+          if (rest != "" && index(rest, "/") == 0 && (f[2] in mine)) exit 0
+        }
+      }
+      exit 1
+    }
+  ' "$2"
+}
+
+summary() { # summary RUN LEDGER — '<base> <state>'
+  local ledger=$2 doc base range total state
+  doc=$(sed -n '1s/^# Phase run — spec: //p' "$ledger")
+  base=$(sed -n '2s/^# base: \(.*\)  requested: .*$/\1/p' "$ledger")
+  range=$(sed -n '2s/^# base: .*  requested: //p' "$ledger")
+  case "$doc" in /*) ;; *) doc="$main/$doc" ;; esac
+  # A legacy ledger may name the main checkout's copy, gone once the owner
+  # moved that checkout; its base worktree is .worktrees/base.
+  if [ ! -f "$doc" ]; then
+    case "$doc" in "$main"/*) doc="$main/.worktrees/base/${doc#"$main"/}" ;; esac
+  fi
+  total=""
+  if [ -f "$doc" ] && [ -n "$range" ]; then
+    total=$("$here/parse-phases" "$doc" "$range" 2>/dev/null | grep -c .) || total=""
+  fi
+  state=$("$here/phase-state" --ledger "$ledger" 2>/dev/null) || state=""
+  STATE=$state TOTAL=$total AGE=$((now - $(mtime "$ledger"))) awk -v base="${base:--}" '
+    BEGIN {
+      k = split(ENVIRON["STATE"], rows, "\n")
+      for (i = 1; i <= k; i++) {
+        split(rows[i], f, "\t")
+        if (f[1] == "run") { draining = (f[2] == "draining"); continue }
+        if (f[1] == "batch") {
+          if (f[3] == "open") { bk = f[2]; bst = "merging" }
+          else if (f[3] == "conflict") { bk = f[2]; bst = "resolving" }
+          else if (f[3] == "built") { bk = f[2]; bst = "verifying" }
+          else if (f[3] == "landable") { bk = f[2]; bst = "landing" }
+          continue
+        }
+        s = f[2]
+        if (s == "merged") merged++
+        else if (s == "active" && f[5] + 0 > 0) repairing++
+        else if (s == "active") building++
+        else if (s == "failing") repairing++
+        else if (s == "queued") queued++
+        else if (s == "held") held++
+        else if (s == "failed") failed++
+      }
+      out = (merged + 0) (ENVIRON["TOTAL"] != "" ? "/" ENVIRON["TOTAL"] : "") " merged"
+      if (draining) out = out " · draining"
+      if (building) out = out " · " building " building"
+      if (queued) out = out " · " queued " queued"
+      if (bk != "") out = out " · batch " bk " " bst
+      if (repairing) out = out " · " repairing " repairing"
+      if (held) out = out " · " held " held"
+      if (failed) out = out " · " failed " failed"
+      age = ENVIRON["AGE"] + 0
+      if (age > 900) {
+        if (age < 3600) out = out " · idle " int(age / 60) "m"
+        else if (age < 172800) out = out " · idle " int(age / 3600) "h"
+        else out = out " · idle " int(age / 86400) "d"
+      }
+      print base " " out
+    }'
+}
+
+for ledger in "$root"/*/run.md; do
+  [ -f "$ledger" ] || continue
+  run=$(basename "$(dirname "$ledger")")
+  [ "$run" != "$self" ] || continue
+  if finished "$ledger"; then continue; fi
+  if [ $((now - $(mtime "$ledger"))) -gt "$recent" ] && ! has_worktree "$run" "$ledger"; then
+    continue
+  fi
+  if [ "$names_only" = yes ]; then
+    printf '%s\n' "$run"
+  else
+    printf '%s %s\n' "$run" "$(summary "$run" "$ledger")"
+  fi
+done
+exit 0
