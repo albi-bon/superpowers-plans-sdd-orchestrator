@@ -72,9 +72,12 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
        package — never a production build when a typecheck exists. `Full
        suites:` is every command that runs a whole suite — the root test
        command, a whole package's test script, integration and end-to-end
-       suites — and production builds. Workers run only the first; the
-       verifier runs the second. Record both under Global constraints, with
-       the repository's exact command spelling.
+       suites — and production builds. When the repository's instructions
+       name a command that runs another one's suites too (a gate over every
+       package that the root test command is a subset of), list only the
+       covering command, so no suite runs twice. Workers run only the first;
+       the verifier runs the second. Record both under Global constraints,
+       with the repository's exact command spelling.
     6. Split the phase into 3 to 10 tasks, ordered so each builds only on
        earlier ones. A task is a coherent slice one agent can implement and
        test in one sitting, touching a small set of files.

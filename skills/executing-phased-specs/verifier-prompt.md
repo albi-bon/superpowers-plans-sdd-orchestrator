@@ -39,7 +39,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     2. Work out which gates this repository actually has — typecheck, lint,
        test, build, whatever is really there — from its manifests, scripts and
        configuration. Nothing is hard-coded; different repositories have
-       different gates.
+       different gates. Run each suite once: when the repository's
+       instructions name a command that covers another (a gate that runs
+       every package suite, the root test command among them), run the
+       covering command and not the one it covers.
     3. Run them.
     4. Report the exit code of every command you run. A suite that prints
        "all passed" and exits non-zero is a FAIL. A suite whose summary line

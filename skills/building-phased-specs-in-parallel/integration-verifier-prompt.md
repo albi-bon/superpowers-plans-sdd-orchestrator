@@ -84,8 +84,11 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     5. Work out which gates this repository actually has — typecheck, lint,
        test, build, whatever is really there — from its manifests, scripts and
        configuration. Nothing is hard-coded; different repositories have
-       different gates. Include every test configuration, not only the root
-       unit suite: a separate integration suite (a `test:integration` script,
+       different gates. Run each suite once: when the brief's `Full suites:`
+       line or the repository's instructions name a command that covers
+       another (a gate that runs every package suite, the root test command
+       among them), run the covering command and not the one it covers.
+       Include every test configuration, not only the root unit suite: a separate integration suite (a `test:integration` script,
        a second test-runner config) that needs a database or Docker, and an
        end-to-end suite. Start the services they need with the repository's
        own commands (its compose file, its scripts) and stop them afterwards.

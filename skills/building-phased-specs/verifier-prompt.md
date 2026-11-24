@@ -64,7 +64,10 @@ Subagent (general-purpose; portable envelope — see platform-guide.md):
     5. Work out which gates this repository actually has — typecheck, lint,
        test, build, whatever is really there — from its manifests, scripts and
        configuration. Nothing is hard-coded; different repositories have
-       different gates.
+       different gates. Run each suite once: when the brief's `Full suites:`
+       line or the repository's instructions name a command that covers
+       another (a gate that runs every package suite, the root test command
+       among them), run the covering command and not the one it covers.
     6. Run the gates in scope. Prefix every whole-suite and production-build
        command — everything on the brief's `Full suites:` line — with
        `FULL_CHECKS=1`, for example `FULL_CHECKS=1 pnpm test`. A repository
